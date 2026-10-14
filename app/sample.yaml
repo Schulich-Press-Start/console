@@ -1,0 +1,16 @@
+# Lets Twister, Zephyr's test runner, build the app. CI builds every scenario
+# below on both integration platforms. Zephyr v4.4 only looks for sample.yaml
+# and testcase.yaml, so keep these names until we move past it.
+sample:
+  description: SPS console firmware
+  name: console
+common:
+  build_only: true
+  integration_platforms:
+    - nucleo_h755zi_q/stm32h755xx/m7
+    - native_sim
+tests:
+  app.default: {}
+  app.debug:
+    extra_overlay_confs:
+      - debug.conf

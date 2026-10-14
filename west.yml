@@ -1,0 +1,29 @@
+# SPS console west manifest (T2 topology).
+# console is the manifest repo: `west update` pulls a pinned Zephyr release,
+# only the Zephyr modules we use, and our forks.
+
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: sps
+      url-base: https://github.com/Schulich-Press-Start
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      # latest stable release. bump it in its own PR and let CI check it
+      revision: v4.4.2
+      import:
+        # only clone the modules we need so `west update` stays small
+        name-allowlist:
+          - cmsis_6    # cortex-m core headers for the arm port
+          - hal_stm32  # stm32 hal for the nucleo h755zi-q
+
+    # our 32blit sdk fork. the zephyr platform port will live in it next to
+    # 32blit-pico and 32blit-stm32. the zephyr module wiring (zephyr/module.yml
+    # in the fork) comes later, so for now west only clones it.
+    - name: 32blit-sdk
+      remote: sps
+      revision: master
+      path: modules/lib/32blit-sdk

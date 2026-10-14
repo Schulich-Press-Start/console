@@ -1,0 +1,47 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    # linux only to keep ci quick. add macos or windows jobs if we ever need
+    # to check host builds there
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: console
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: 3.12
+
+      - name: Set up Zephyr
+        uses: zephyrproject-rtos/action-zephyr-setup@be8136a8bba01580485d98b7ad2d32477c36a49a # v1.0.15
+        with:
+          app-path: console
+          toolchains: arm-zephyr-eabi
+
+      - name: Build the app (Nucleo H755ZI-Q M7 and native_sim)
+        working-directory: console
+        run: west twister -T app -v --inline-logs --integration
+
+      - name: Run the tests on native_sim
+        working-directory: console
+        run: west twister -T tests -v --inline-logs --integration
