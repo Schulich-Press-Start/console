@@ -72,6 +72,16 @@ Data flows downward from game logic to hardware, and asset/handle data flows upw
 
 ## 6. Game Loop & Data Flow
 
+```mermaid
+flowchart TD
+    Input[Input Platform Abstraction] --> GameLoop[Fixed-Timestep Game Loop]
+    GameLoop --> Systems[ECS Systems: Movement, Physics, AI]
+    Systems --> Commands[Draw Command Buffer]
+    Commands --> Renderer[Renderer Stage: 2D / Raycaster / 3D]
+    Renderer --> Display[Display Platform Abstraction]
+    Display --> Hardware[(Hardware / OS)]
+    GameLoop -.->|interpolation alpha| Renderer
+```
 
 **Key idea:** The loop never calls `blit::screen` directly. It emits commands. The renderer decides how to batch and flush them based on the active render stage (2D, raycaster, 3D).
 
@@ -79,6 +89,15 @@ Data flows downward from game logic to hardware, and asset/handle data flows upw
 
 ## 7. Rendering Evolution Path
 
+```mermaid
+flowchart LR
+    S1[Simple 2D<br>Sprites, Rects, Text] --> S2[Complex 2D<br>Atlases, Layers, Particles]
+    S2 --> S3[Raycaster<br>Corridors, Billboards]
+    S3 --> S4[3D<br>Software Rasterizer, Depth]
+    S1 -.->|additive| S2
+    S2 -.->|additive| S3
+    S3 -.->|additive| S4
+```
 
 | Stage | Capability | Renderer Additions | Game API Impact |
 |-------|-----------|-------------------|-----------------|
@@ -123,6 +142,15 @@ Physics is an SDK-owned system, not something every game writes from scratch.
 
 ## 10. Editor Architecture
 
+```mermaid
+flowchart LR
+    Editor[Editor Process<br>Dear ImGui + SDL2] -->|writes scene data| SceneFiles[(Scene Files<br>JSON/YAML/Binary)]
+    SceneFiles -->|reads| AssetPipeline[Asset Pipeline<br>Importer + Packer]
+    AssetPipeline -->|produces| GameData[(Game-Ready Assets<br>Handles + Blobs)]
+    GameData -->|consumes| SDK[SDK Framework<br>ECS, Physics, Renderer]
+    SDK --> Game[Game Code<br>Systems + Logic]
+    Game -->|displays| Display[(Display)]
+```
 
 | Editor Responsibility | SDK Responsibility |
 |----------------------|-------------------|
