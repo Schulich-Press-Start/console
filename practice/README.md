@@ -4,7 +4,7 @@ Week 1 games and week 2 Zephyr apps go here, one folder each, named after you an
 
 ## Week 1: a game on the 32blit SDK
 
-Make **Pong, Snake, or Brick Breaker**. Game logic goes in `update()`, drawing in `render()`, and you need buttons, a score on screen, one sound effect, and a sprite sheet loaded through `assets.yml`.
+Make a small **Pong, Snake, or Brick Breaker**. Game logic goes in `update()`, drawing in `render()`, and you need buttons and a score on screen. A sound effect and a sprite sheet loaded through `assets.yml` are stretch goals.
 
 1. Make a branch: `yourname/practice-game`.
 2. Copy our [32blit-boilerplate](https://github.com/Schulich-Press-Start/32blit-boilerplate) fork into your folder, for example `practice/aly-pong/`. Copy the files only, not its `.git` folder.
@@ -17,7 +17,7 @@ Make **Pong, Snake, or Brick Breaker**. Game logic goes in `update()`, drawing i
    cmake --build build
    ```
 
-   On Windows, follow the SDK's [Windows guide](https://github.com/32blit/32blit-sdk/blob/master/docs/Windows.md) for the generator to use.
+   On Windows, follow the SDK's [Windows guide](https://github.com/32blit/32blit-sdk/blob/master/docs/Windows.md) for the generator to use. No SDK on your laptop? [`tools/sdk-docker`](../tools/sdk-docker/) builds your game for the browser with only Docker.
 5. Open a PR. Your pair reviews it first, then Yassin does the final review and merges.
 
 ## Week 2: an event pipeline on Zephyr
