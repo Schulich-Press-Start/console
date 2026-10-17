@@ -1,0 +1,11 @@
+# docker compose up --build, then open http://localhost:8080
+# to add your own game: GAME_DIR=../../practice/your-game docker compose up --build
+services:
+  sdk:
+    build: .
+    # emscripten 2.0.18 only ships for x86, so apple silicon macs run it through rosetta
+    platform: linux/amd64
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${GAME_DIR:-./no-game}:/game:ro

@@ -28,6 +28,7 @@ sps-workspace/               made by west init
 │   ├── lib/                 our libraries
 │   ├── tests/               ztest suites, run on native_sim in CI
 │   ├── practice/            week 1 practice games
+│   ├── tools/sdk-docker/    the SDK in Docker, with games running in your browser
 │   ├── zephyr/module.yml    makes console a Zephyr module
 │   └── west.yml             Zephyr version, modules, and forks
 ├── zephyr/                  upstream Zephyr, pinned
