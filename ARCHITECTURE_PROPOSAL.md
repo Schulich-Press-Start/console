@@ -144,17 +144,29 @@ Physics is an SDK-owned system, not something every game writes from scratch.
 
 ## 10. Editor Architecture
 
-The editor is a **separate process** that runs on desktop — never on the STM32. It can be delivered as either a **native app** (Dear ImGui + SDL2) or a **web app** running in the browser (Phase 3+). Both share the same SDK API and data formats.
+The editor is a **separate process** that runs on desktop — never on the STM32. It is written once in **Dear ImGui + SDL2 (C++)** and compiled to two targets:
+
+- **Native binary** (Windows/Linux/Mac) — standard desktop app, full performance
+- **WASM in the browser** — same C++ code compiled via Emscripten, running ImGui over WebGL/SDL2
+
+There is **no second codebase**. The editor UI, code panel, REPL, and scene tools are the same C++ ImGui code in both cases. MicroPython and the SDK preview can also compile to WASM for in-browser execution.
 
 ```mermaid
 flowchart LR
-    Editor["Editor Process<br>Native (ImGui+SDL2)<br>or Web (Browser)"] -->|writes scene data| SceneFiles[(Scene Files<br>JSON/YAML/Binary)]
+    Editor["Editor Process<br>Dear ImGui + SDL2 (C++)"] -->|writes scene data| SceneFiles[(Scene Files<br>JSON/YAML/Binary)]
     SceneFiles -->|reads| AssetPipeline[Asset Pipeline<br>Importer + Packer]
     AssetPipeline -->|produces| GameData[(Game-Ready Assets<br>Handles + Blobs)]
     GameData -->|consumes| SDK[SDK Framework<br>ECS, Physics, Renderer]
     SDK --> Game[Game Code<br>Systems + Logic]
     Game -->|displays| Display[(Display)]
 ```
+
+**Deployment targets:**
+
+| Target | Build | Notes |
+|--------|-------|-------|
+| **Desktop native** | MSVC / GCC / Clang | Full performance, direct file system access |
+| **Browser (WASM)** | Emscripten (em++) | Same code; file I/O via browser File API / IndexedDB; no install required |
 
 | Editor Responsibility | SDK Responsibility |
 |----------------------|-------------------|
@@ -281,19 +293,24 @@ One language runs on every target. The same script prototypes on desktop and fla
 
 ### Browser-Based Editor
 
-The editor can optionally run in a **browser** as a web application, rather than requiring a native desktop install. MicroPython's WASM ports make this possible — the preview instance (MicroPython + SDK) can run in-browser alongside the editor UI.
+The editor can optionally run in a **browser** as a web application, without requiring a native desktop install. **Dear ImGui compiles to WASM via Emscripten** — the same C++ editor code runs natively on desktop and in the browser over WebGL/SDL2. MicroPython's WASM ports allow the preview instance (MicroPython + SDK) to run in-browser alongside the editor.
 
 **Architecture options:**
 
 | Model | Editor UI | Preview Runtime | Tradeoff |
 |-------|-----------|-----------------|----------|
-| **Web editor + local server** | HTML/JS in browser | Local native process (C++ + MicroPython) | Best preview performance; requires local helper process |
-| **Full WASM in browser** | HTML/JS in browser | WASM-compiled SDK + MicroPython in-browser | No local install; preview performance limited by WASM |
-| **Hybrid** | HTML/JS in browser | Local native preview + WASM for quick edits | Best balance; more complex to build |
+| **Full WASM in browser** | ImGui compiled to WASM via Emscripten | MicroPython + SDK compiled to WASM | No local install; one codebase; preview performance ~70–90% of native |
+| **WASM editor + local server** | ImGui compiled to WASM via Emscripten | Local native process (C++ + MicroPython) | Best preview performance; requires local helper process |
+| **WASM editor + WebSocket preview** | ImGui compiled to WASM via Emscripten | Native preview streams frames over WebSocket | Native preview quality; adds network latency |
 
-**Recommended path:** Start with the native ImGui editor (Phase 1–2, best performance and simplest architecture). Add a web-based editor option in Phase 3+ using the same SDK API bindings, with MicroPython WASM for in-browser preview. The editor UI would be HTML/JavaScript; the SDK and scripting runtime compile to WASM via Emscripten.
+**Recommended path:** Start with the native desktop build (Phase 1–2, simplest). The WASM browser build comes nearly for free once the codebase is Emscripten-clean — same ImGui code, same SDK, same MicroPython scripts. Full-WASM (everything in browser) is the simplest deployment: host the WASM bundle on a static server and open a URL.
 
-**Key benefit:** A browser-based editor lowers the barrier to entry — devs can open a URL and start editing without installing anything. This is especially valuable for education and collaborative workflows.
+**Browser considerations:**
+
+- **File I/O:** Browser File API and IndexedDB replace direct file system access. Emscripten's MEMFS/IDBFS provides a virtual file system that persists to IndexedDB.
+- **Performance:** WASM typically runs at ~70–90% of native speed. The editor UI is ImGui (GPU-light), so this is rarely a bottleneck. Preview rendering runs in WebGL.
+- **No install:** Devs open a URL and start editing. Especially valuable for education and collaborative workflows.
+- **Distributing updates:** Host a new WASM bundle — no installer, no version conflicts.
 
 ---
 
@@ -427,7 +444,7 @@ MicroPython handles game logic (flight models, AI, scene composition) while Jet 
 8. **Asset hot-reload:** Can the desktop simulator reload a changed PNG without restarting the game?
 9. **Save game abstraction:** Where does save data live — flash sectors, SD card, or desktop file? How does the SDK virtualize this?
 10. **Jet integration:** Should Jet replace the 2D renderer entirely at Phase 4, or coexist as a separate 3D-only path alongside the 2D batcher?
-11. **Browser editor model:** When the web-based editor is added (Phase 3+), should the preview run fully in-browser via WASM, or via a local server process? What's the latency budget for the WebSocket bridge?
+11. **Emscripten readiness:** How much of the editor codebase needs to change to be Emscripten-clean? File I/O, threading, and dynamic allocation paths need auditing. Should Emscripten compatibility be a Phase 1 constraint or added later?
 
 ---
 
