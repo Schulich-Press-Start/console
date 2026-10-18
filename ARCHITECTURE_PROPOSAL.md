@@ -1,8 +1,8 @@
 # 32blit-Style SDK & Editor — High-Level Architecture Proposal
 
-**Status:** Initial concept for SDK team review  
-**Audience:** SDK developers, tooling contributors, game developers  
-**Format:** No code. Concepts, boundaries, data flow, and expansion paths only.
+**Status:** Concept for SDK team review — updated with scripting layer (MicroPython), 3D rendering (Jet), and editor workflow decisions
+**Audience:** SDK developers, tooling contributors, game developers
+**Format:** Concepts, boundaries, data flow, and expansion paths. Minimal code — snippets illustrate API shape only.
 
 ---
 
@@ -32,7 +32,8 @@
 
 The SDK uses a clean layered architecture. Game code sits at the top and never touches hardware directly. Each layer only communicates with the layer below it:
 
-- **Game Code** — game-specific rules, win conditions, level scripts
+- **Game Code** — game-specific rules, win conditions, level scripts (authored in MicroPython)
+- **Scripting Layer** — MicroPython VM, sandboxed execution, SDK API bindings, REPL, hot-reload
 - **SDK Framework** — shared systems: ECS, scene graph, physics, input mapping, audio
 - **Runtime Services** — asset lifetime, fonts, file access, texture atlas
 - **Renderer** — draw command buffer, 2D batching, raycaster stage, future 3D
@@ -48,6 +49,7 @@ Data flows downward from game logic to hardware, and asset/handle data flows upw
 | Layer | Responsibility | Examples of What Lives Here |
 |-------|---------------|----------------------------|
 | **Game Code** | Game-specific rules, win conditions, level scripts | Player controller, enemy AI, HUD logic |
+| **Scripting Layer** | MicroPython VM executing game logic safely | Sandbox, REPL, hot-reload, SDK API bindings, `@micropython.native` |
 | **SDK Framework** | Shared systems that every game can use | ECS, scene graph, physics, input mapping, audio |
 | **Runtime Services** | Asset lifetime, font/text, file access | Texture atlas, sprite registry, save slots |
 | **Renderer** | Translating game intent into pixels | Draw commands, 2D batcher, raycaster, future 3D |
@@ -104,7 +106,7 @@ flowchart LR
 | **Simple 2D** | Sprites, rectangles, text | Individual draw commands | None — `draw_sprite()`, `draw_rect()` |
 | **Complex 2D** | Atlases, layers, particles, physics debug shapes | Batcher, layer sorter, command merging | Same API; SDK batches internally |
 | **Raycaster** | Doom-style corridors, sprite billboarding | Column emitter, wall shader, z-buffer | New `raycast_scene` component; existing 2D still works |
-| **3D** | Textured cubes, basic models, depth | Software rasterizer, vertex transform, depth buffer | New `transform3d` + `mesh` components; 2D UI still layers on top |
+| **3D** | Textured cubes, basic models, depth | Jet 3D rasteriser (integer math, RGB565, Gouraud/textured shading, particles, lens flare) | New `transform3d` + `mesh` components; 2D UI still layers on top |
 
 **Critical rule:** Each stage is additive. A game built for Stage 1 still compiles and runs under Stage 4.
 
@@ -162,9 +164,184 @@ flowchart LR
 
 **Key rule:** The editor writes data files. The SDK reads them. The editor does not compile or link against game logic.
 
+### Editor Workflow: GUI + Code
+
+Everything in the editor can be done through the GUI **or** through code. The visual editor interfaces the same SDK calls that scripts use, so there is a single source of truth — no divergence between "GUI state" and "code state."
+
+**Code Panel:** Every item in the editor has an associated code panel showing the Python/SDK calls that correspond to the GUI action. Devs can read it to learn the API, edit it directly, or use it as a starting point for scripts.
+
+**Live Console (REPL):** The editor exposes a MicroPython REPL connected to the preview instance. Devs type commands and see results immediately — no save, no compile, no restart.
+
+```
+>>> player.set_position(x=200, y=150)
+>>> game.spawn("enemy", type="jet", x=300, y=100)
+>>> physics.apply_force(player, fx=10, fy=-5)
+```
+
+**Hot Reload:** Editing a script in the code panel and saving triggers an automatic module reload. The preview instance picks up the new logic on the next frame. Entity state (positions, health, etc.) is preserved across reloads — only the logic changes.
+
+**No compile step for scripts.** MicroPython is interpreted; the file is read and executed directly. `@micropython.native` functions are compiled to ARM machine code transparently at first call — the developer never sees a build tool.
+
+| Workflow | Steps | Speed |
+|----------|-------|-------|
+| Tweak a value | REPL command | Instant |
+| Edit game logic | Save → hot reload | <1 second |
+| Edit scene/asset | Save → preview updates | <1 second |
+| Ship to hardware | Bundle scripts → C++ build → flash | Minutes |
+| Edit C++ system | Build → link → flash | Minutes |
+
+### Editor-as-Consumer Boundary
+
+The editor **never links against game code**. It only calls SDK APIs. Both the editor and the game call the same SDK functions — the editor calls them in preview mode (sandboxed, no real game state), and the game calls them for real.
+
+Scripts written in the editor's code panel are **exported to the game project** — the game runs them on hardware, not the editor. The editor produces data; the game consumes it.
+
+```mermaid
+flowchart LR
+    subgraph Editor["Editor (Desktop Only)"]
+        CodePanel["Code Panel<br>Python + SDK Calls"] --> Preview["Preview Instance<br>MicroPython + SDK"]
+        REPL["Live Console<br>REPL"] --> Preview
+        SceneEd["Scene Editor<br>Visual GUI"] --> Preview
+    end
+    Preview -->|"writes scene files<br>+ scripts"| GameProject["Game Project<br>JSON + .py scripts"]
+    GameProject -->|"flashed to"| Game["Game Runtime<br>STM32 / Desktop"]
+```
+
 ---
 
-## 11. Asset Pipeline (Conceptual)
+## 11. Scripting Layer (MicroPython)
+
+The SDK uses **MicroPython** as its scripting language for game logic. This replaces the traditional "write C++ and recompile" workflow with an interpreted, hot-reloadable scripting model.
+
+### Why MicroPython
+
+| Factor | MicroPython | Lua | Python (CPython) | C++ only |
+|--------|------------|-----|-----------------|----------|
+| **Developer familiarity** | Python — taught in schools everywhere | Niche, game-dev only | Python — universal | Requires C++ knowledge |
+| **Flash size (STM32)** | ~256–512KB | ~200KB | ~1–2MB (impractical) | 0KB |
+| **REPL / live coding** | Built-in | Not built-in | Built-in but too heavy | None |
+| **Optimization path** | `@micropython.native` → ARM code | Rewrite in C++ | Slow everywhere | Full control |
+| **Browser (WASM)** | Working ports | Fengari/lua.js | Pyodide (~10MB) | No |
+| **STM32 support** | Official port | Via C API | Impractical | Native |
+| **Determinism** | GC nondeterministic (manageable) | Fully deterministic | GC nondeterministic | Full control |
+
+**Decision:** MicroPython wins on accessibility, REPL support, cross-platform reach, and the `@micropython.native` optimization path. Its GC nondeterminism is manageable with the strategies in Section 12.
+
+### Layered API
+
+Scripts interact with the SDK through a layered API — devs choose their abstraction level per use-case:
+
+| Level | Abstraction | Example | Audience |
+|-------|------------|---------|----------|
+| **1 — High-level** | Game-domain functions | `game.spawn("enemy", x, y)`, `ai.patrol(entity)` | Beginners, prototyping |
+| **2 — Mid-level** | ECS queries, component access | `for e in query(Transform, Velocity): ...` | Intermediate |
+| **3 — Low-level** | Math, memory, primitives | `math.sin()`, `memory.alloc()` | Advanced, optimization |
+
+Advanced devs can also write **custom C++ systems** and expose them to MicroPython — there is no ceiling. `@micropython.viper` provides C-level performance with Python syntax for the hottest script code.
+
+### Developer Freedom Spectrum
+
+```
+Most safe / constrained                          Most free / dangerous
+      │                                                │
+   JSON ──── MicroPython ──── @native/@viper ──── C++ (raw)
+   (data)    (logic via SDK     (compiled Python,  (bypass SDK,
+              API)               closer to C)       direct hardware)
+```
+
+- **JSON** — configure, don't create. Safe for modders and non-programmers.
+- **MicroPython** — full game logic through SDK APIs. Sandbox prevents memory corruption and hardware access.
+- **`@micropython.native`** — compiles hot functions to ARM Thumb-2 at runtime (~5–10× faster). Optimization without leaving the language.
+- **`@micropython.viper`** — C-level performance with type annotations. Powerful but dangerous; for advanced devs only.
+- **C++ escape hatch** — any Python-accessible function can also be a C++ system. No ceiling.
+
+### SDK Weight
+
+| Component | Flash | RAM |
+|-----------|-------|-----|
+| MicroPython VM (stripped) | ~256–512KB | ~32–64KB |
+| C++ SDK (ECS, physics, renderer) | ~200–400KB | ~100–200KB |
+| Game code + assets | Varies | Varies |
+| **STM32H7 total (2MB flash, 1MB RAM)** | **~1–1.5MB** | **~256–512KB** |
+
+MicroPython modules can be stripped (`urllib`, `socket`, etc.) to reduce flash usage. The baseline is acceptable for STM32H7's 2MB flash budget.
+
+### Cross-Platform
+
+| Platform | MicroPython | Notes |
+|----------|------------|-------|
+| **STM32H7** | Official port | Battle-tested |
+| **Windows / Linux / Mac** | Desktop ports | Full support; same scripts as embedded |
+| **Browser** | WASM ports | Maturing; enables future web editor/preview |
+| **Zephyr RTOS** | Via C API | Community port |
+
+One language runs on every target. The same script prototypes on desktop and flashes to STM32 without changes.
+
+---
+
+## 12. Determinism & Performance
+
+### Fixed Timestep & Script Execution
+
+Game logic (including MicroPython scripts) runs on a deterministic fixed-timestep clock. Scripts execute inside the game loop tick, not in real-time. The same input produces the same output every run.
+
+### GC Determinism Strategies
+
+MicroPython's garbage collector is nondeterministic — it can pause execution at arbitrary points. On a 60 FPS target (16.6 ms budget), mitigations include:
+
+1. **`gc.collect()` at frame boundaries** — trigger collection during predictable moments (end of frame, loading screens).
+2. **`gc.disable()` during critical sections** — prevent pauses during physics, rendering, or timing-sensitive logic.
+3. **Pre-allocate objects** — use spawn pools; avoid runtime allocation during gameplay.
+4. **Seeded RNG** — provide `sdk.random()` with a deterministic seed. Never expose raw `random` to scripts.
+
+For most 2D games, this is sufficient. For precision-timing games (rhythm, fighting), the C++ escape hatch handles the timing-critical logic.
+
+### Performance Budget (60 FPS = 16.6 ms)
+
+| Component | Budget | Language |
+|-----------|--------|----------|
+| ECS systems | ~5–8 ms | C++ |
+| Physics | ~2–4 ms | C++ |
+| MicroPython callbacks | ~0.1–1 ms | MicroPython |
+| Command buffer flush | ~1–2 ms | C++ |
+| Platform output | ~0.5 ms | C++ |
+
+**The hot path stays in C++.** Scripts run at decision points ("what does the AI do?", "what happens on collision?"), not per-pixel or per-triangle. ~50–200 script calls per frame is negligible even on interpreted MicroPython.
+
+### 3D Rendering: Jet
+
+For Phase 4 (3D), the SDK integrates **[Jet](https://github.com/cubecoders/jet)** — a tiny, dependency-free, fixed-function 3D software rasteriser in C++17:
+
+- **Integer arithmetic** in the rasterisation hot path — optimal for MCUs
+- **RGB565 output** — matches STM32H7 display natively
+- **~100k tris/sec on ESP32-S3** — STM32H7 at 480 MHz estimated 200–400k tris/sec
+- **Flat, Gouraud, and textured** shading; depth buffer, culling, particles, lens flare
+- **MIT license** — no restrictions
+
+MicroPython handles game logic (flight models, AI, scene composition) while Jet handles rendering (rasterisation, depth, shading). The SDK wraps Jet's API and exposes it to scripts.
+
+| Scenario | Triangles | Estimated FPS (STM32H7) |
+|----------|-----------|------------------------|
+| Simple jet + terrain | ~5k | ~60 |
+| Dogfight, 4 jets + clouds | ~15k | ~40–50 |
+| Complex scene | ~30k | ~20–30 |
+
+### Optimization Tools for Developers
+
+| Tool | What it shows | How devs use it |
+|------|--------------|-----------------|
+| **Tracy profiler** | Frame-by-frame timing | Find bottleneck system |
+| **Script profiler** | Per-function MicroPython timing | Find slow script → add `@micropython.native` or rewrite in C++ |
+| **Memory dashboard** | Heap usage, fragmentation | Fix allocation patterns |
+| **Draw call counter** | Batched command count | Optimize rendering |
+| **Hot-reload** | Edit → see change in <1 s | Rapid iteration |
+| **REPL** | Live state inspection | Debug entity state mid-game |
+
+**Optimization path:** interpreted → `@micropython.native` (5–10×) → `@micropython.viper` (C-level) → custom C++ system (maximum).
+
+---
+
+## 13. Asset Pipeline (Conceptual)
 
 | Stage | Tool | Output |
 |-------|------|--------|
@@ -177,7 +354,7 @@ flowchart LR
 
 ---
 
-## 12. Zephyr RTOS Considerations
+## 14. Zephyr RTOS Considerations
 
 | Concern | Bare Metal (32blit HAL) | Zephyr RTOS |
 |---------|------------------------|-------------|
@@ -193,50 +370,60 @@ flowchart LR
 
 ---
 
-## 13. Expansion Roadmap Table
+## 15. Expansion Roadmap Table
 
 | Phase | Target | New SDK Modules | New Editor Features | Game Dev Learning Curve |
 |-------|--------|----------------|---------------------|------------------------|
-| **1** | Simple 2D | Sprite renderer, fixed loop, basic input | Scene viewer, sprite importer, Animator, Simple one layer tile map editor| Hours — one rectangle on screen |
-| **2** | Complex 2D | ECS, physics, tilemap renderer, audio mixer |multilayer Tilemap editor, physics debug view | Days — components and systems |
+| **1** | Simple 2D + Scripting | Sprite renderer, fixed loop, basic input, MicroPython VM + REPL | Scene viewer, sprite importer, animator, simple one-layer tile map editor, code panel, live console | Hours — one rectangle on screen |
+| **2** | Complex 2D | ECS, physics, tilemap renderer, audio mixer, `@micropython.native` | Multi-layer tilemap editor, physics debug view, hot-reload | Days — components and systems |
 | **3** | Raycaster | Column renderer, wall/floor shading | Raycaster level editor | Weeks — 2.5D concepts |
-| **4** | 3D | Software rasterizer, depth buffer, 3D transforms, texturing (if we go with h7r7)| Basic 3D scene preview | Weeks to months — 3D math |
+| **4** | 3D (Jet) | Jet 3D rasteriser (integer math, RGB565, Gouraud/textured), depth buffer, 3D transforms, particles | Basic 3D scene preview, 3D gizmos | Weeks to months — 3D math |
 
 ---
 
-## 14. Ease-of-Use Checklist for Game Developers
+## 16. Ease-of-Use Checklist for Game Developers
 
 - [ ] One function to start: `game.init()`, `game.update(dt)`, `game.render(alpha)`.
 - [ ] No manual memory management for assets; use handles.
 - [ ] Adding a moving sprite = adding two components to one entity.
 - [ ] Changing a level = editing a scene file in the editor, not recompiling.
+- [ ] Changing game logic = editing a MicroPython script, saving, and seeing the result hot-reloaded in <1 second.
+- [ ] No compile step for scripts — edit, save, see result. `@micropython.native` compiles transparently at first call.
+- [ ] REPL available for live experimentation: spawn entities, tweak values, inspect state without restarting.
+- [ ] Code panel shows the Python/SDK calls behind every GUI action — GUI and code are two views of the same thing.
 - [ ] Debug overlay toggle shows physics shapes, draw calls, and FPS without code changes.
 - [ ] Same project folder opens on desktop simulator and flashes to hardware.
+- [ ] Scripts written in the editor run unchanged on STM32 hardware.
 
 ---
 
-## 15. Open Questions & Further Research
+## 17. Open Questions & Further Research
 
 1. **Render backend:** Should Stage 1 use OpenGL ES on desktop for hardware acceleration, or pure software rendering to match the STM32H7?
 2. **Physics library:** Write a minimal AABB/circle solver in-house, or integrate a lightweight 2D physics engine behind the SDK interface?
 3. **ECS vs. traditional OOP:** Is a full ECS worth the complexity for games that may never have more than 50 entities? Consider a hybrid "light ECS."
 4. **Zephyr threading model:** Should the game loop be a Zephyr thread, or should Zephyr simply provide the PAL while the game runs in a super-loop?
-5. **Editor language:** Dear ImGui + SDL2 (C++) vs. webview + local server vs. standalone desktop tool?
-6. **Asset hot-reload:** Can the desktop simulator reload a changed PNG without restarting the game?
-7. **Save game abstraction:** Where does save data live — flash sectors, SD card, or desktop file? How does the SDK virtualize this?
+5. **MicroPython integration depth:** How much of the SDK API is exposed to scripts in Phase 1 vs. later phases? Start with high-level only, or expose mid-level ECS queries immediately?
+6. **Sandbox scope:** Which MicroPython modules are allowed in the sandbox? How strict is the import whitelist?
+7. **GC tuning:** What GC thresholds and collection points work best on STM32H7? Need empirical testing with representative game loads.
+8. **Asset hot-reload:** Can the desktop simulator reload a changed PNG without restarting the game?
+9. **Save game abstraction:** Where does save data live — flash sectors, SD card, or desktop file? How does the SDK virtualize this?
+10. **Jet integration:** Should Jet replace the 2D renderer entirely at Phase 4, or coexist as a separate 3D-only path alongside the 2D batcher?
 
 ---
 
-## 16. Immediate Next Step for SDK Team
+## 18. Immediate Next Step for SDK Team
 
 Prototype **Phase 1** on the desktop simulator only:
 
 1. Platform abstraction interface (display, input, time).
 2. Fixed-timestep game loop.
 3. Minimal draw command buffer (sprite, rect, text).
-4. One sample game: a moving rectangle with input.
+4. **MicroPython VM embedded** with SDK API bindings and REPL.
+5. One sample game: a moving rectangle with input, scripted in MicroPython.
+6. Editor prototype: code panel + live console connected to the preview instance.
 
-Once Phase 1 compiles on Windows via SDL2 and runs on 32blit hardware via the HAL, the team has a contract to build Phase 2 (ECS + physics + complex 2D) against.
+Once Phase 1 compiles on Windows via SDL2, runs on 32blit hardware via the HAL, and MicroPython scripts execute in the editor's preview with hot-reload, the team has a contract to build Phase 2 (ECS + physics + complex 2D + `@micropython.native`) against.
 
 ---
 
