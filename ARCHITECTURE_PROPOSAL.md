@@ -66,7 +66,7 @@ Data flows downward from game logic to hardware, and asset/handle data flows upw
 | Audio | Mixer output format, sample rate, channel volume | SDK audio output (if exposed) | `pdm`, `dac`, or `audio` driver |
 | Storage | Asset loading from flash/SD/host filesystem | `blit::Asset`, filesystem paths | FATFS, `fs_open()`, `fs_read()` |
 
-**Rule:** Game code and editor never call hardware directly. They call the abstraction layer.
+**Rule:** Game code and editor never call hardware directly. They call the abstraction layer. Also everything in the editor can be done with the gui or by coding, you can do anything from moving tiles, animating sprites, and managing assets through code but the visual editor interfaces the code calls for ease of use. The coding should always be available though. maybe a dynamic "code" panel is available for every item in the editor 
 
 ---
 
@@ -197,10 +197,10 @@ flowchart LR
 
 | Phase | Target | New SDK Modules | New Editor Features | Game Dev Learning Curve |
 |-------|--------|----------------|---------------------|------------------------|
-| **1** | Simple 2D | Sprite renderer, fixed loop, basic input | Scene viewer, sprite importer | Hours — one rectangle on screen |
-| **2** | Complex 2D | ECS, physics, tilemap renderer, audio mixer | Tilemap editor, physics debug view | Days — components and systems |
+| **1** | Simple 2D | Sprite renderer, fixed loop, basic input | Scene viewer, sprite importer, Animator, Simple one layer tile map editor| Hours — one rectangle on screen |
+| **2** | Complex 2D | ECS, physics, tilemap renderer, audio mixer |multilayer Tilemap editor, physics debug view | Days — components and systems |
 | **3** | Raycaster | Column renderer, wall/floor shading | Raycaster level editor | Weeks — 2.5D concepts |
-| **4** | 3D | Software rasterizer, depth buffer, 3D transforms | Basic 3D scene preview | Weeks to months — 3D math |
+| **4** | 3D | Software rasterizer, depth buffer, 3D transforms, texturing (if we go with h7r7)| Basic 3D scene preview | Weeks to months — 3D math |
 
 ---
 
