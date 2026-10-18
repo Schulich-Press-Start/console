@@ -1,8 +1,8 @@
-# 32blit-Style SDK & Editor — High-Level Architecture Proposal
+# 32blit-Based SDK and Editor: High-Level Architecture Proposal
 
-**Status:** Concept for SDK team review — updated with scripting layer (MicroPython), 3D rendering (Jet), and editor workflow decisions
+**Status:** Concept for SDK team review
 **Audience:** SDK developers, tooling contributors, game developers
-**Format:** Concepts, boundaries, data flow, and expansion paths. Minimal code — snippets illustrate API shape only.
+**Scope:** Concepts, boundaries, data flow and expansion paths. Code snippets only show API shape.
 
 ---
 
@@ -10,457 +10,322 @@
 
 | Goal | Meaning |
 |------|---------|
-| **Gradual complexity** | A new game developer can start with a single screen and a rectangle; a veteran can layer on ECS, physics, shaders, and 3D without rewriting the SDK. |
-| **Desktop-first iteration** | Build and test on Windows/Linux via the SDL2 desktop simulator before touching hardware. |
-| **Hardware agnostic** | The same game logic runs on bare-metal 32blit, Zephyr RTOS, and desktop with zero game-code changes. |
-| **SDK-owned systems** | Physics, input mapping, asset handling, and rendering are provided by the SDK, not re-implemented in every game. |
-| **Editor-friendly** | The editor is a separate process that talks to the SDK through well-defined handles and metadata, not by reaching into game internals. |
+| Gradual complexity | Beginners start with one screen and a rectangle. Experienced devs add ECS, physics and 3D without rewriting the SDK. |
+| Fast on hardware | Games compile to native C++ on the STM32. Nothing interpreted sits in the hot path. |
+| Desktop-first iteration | Build and test on Windows/Linux/macOS with the SDL2 build before touching hardware. |
+| Hardware agnostic | The same game runs on Zephyr hardware, desktop and browser with no game-code changes. |
+| GUI or code | Anything done in the editor can also be done in code, through the same SDK calls. |
 
 ---
 
-## 2. Guiding Principles
+## 2. Principles
 
-1. **Platform abstraction first.** Every hardware touch goes through a thin interface. The 32blit SDK HAL, Zephyr drivers, and SDL2 desktop port are all just implementations of that interface.
-2. **Command buffer rendering.** Game code never draws directly to the framebuffer. It queues draw commands; the renderer flushes them. This is what makes 2D batching, raycaster columns, and 3D triangles possible without changing the game API.
-3. **Data-driven games.** Levels, sprites, and entity definitions live in asset files. Code handles behavior; data handles content.
-4. **Fixed timestep.** Game logic runs on a deterministic clock. Rendering interpolates between logic frames for smooth visuals.
-5. **Editor as consumer.** The editor loads the same asset files and headers the game loads. It does not contain a second copy of game logic.
-
----
-
-## 3. Layered Architecture
-
-The SDK uses a clean layered architecture. Game code sits at the top and never touches hardware directly. Each layer only communicates with the layer below it:
-
-- **Game Code** — game-specific rules, win conditions, level scripts (authored in MicroPython)
-- **Scripting Layer** — MicroPython VM, sandboxed execution, SDK API bindings, REPL, hot-reload
-- **SDK Framework** — shared systems: ECS, scene graph, physics, input mapping, audio
-- **Runtime Services** — asset lifetime, fonts, file access, texture atlas
-- **Renderer** — draw command buffer, 2D batching, raycaster stage, future 3D
-- **Platform Abstraction** — one interface for display, input, time, audio, storage
-- **Hardware / OS** — SDL2 desktop, 32blit STM32H7 HAL, Zephyr RTOS drivers
-
-Data flows downward from game logic to hardware, and asset/handle data flows upward from platform services to the renderer.
+1. **Build on the 32blit API.** Games are written against the existing 32blit C++ API. Our SDK adds a Zephyr port and optional libraries; it does not replace the engine.
+2. **One API, many ports.** Games never touch hardware. The 32blit engine calls a function table (`blit::api`) that each platform fills in. Zephyr is one more port next to `32blit-stm32`, `32blit-pico` and `32blit-sdl`.
+3. **32blit examples run on the SDK.** Existing 32blit examples and games build and run on Gen 1 and desktop without changes. Any deliberate break from this is documented.
+4. **Pay for what you use.** ECS, physics, raycaster and 3D are separate libraries. A simple game links none of them.
+5. **Data-driven content.** Levels, sprites and entity definitions are asset files. Code handles behaviour, data handles content.
+6. **The editor drives the SDK.** The editor has no logic of its own. Every GUI action is an SDK action that code can also call.
 
 ---
 
-## 4. Layer Responsibilities (Table)
-
-| Layer | Responsibility | Examples of What Lives Here |
-|-------|---------------|----------------------------|
-| **Game Code** | Game-specific rules, win conditions, level scripts | Player controller, enemy AI, HUD logic |
-| **Scripting Layer** | MicroPython VM executing game logic safely | Sandbox, REPL, hot-reload, SDK API bindings, `@micropython.native` |
-| **SDK Framework** | Shared systems that every game can use | ECS, scene graph, physics, input mapping, audio |
-| **Runtime Services** | Asset lifetime, font/text, file access | Texture atlas, sprite registry, save slots |
-| **Renderer** | Translating game intent into pixels | Draw commands, 2D batcher, raycaster, future 3D |
-| **Platform Abstraction** | One interface for all hardware/OS backends | Display flip, button poll, time tick, audio buffer |
-| **Hardware / OS** | The actual silicon or emulator | SDL2 window, 32blit STM32H7, Zephyr display driver |
-
----
-
-## 5. Platform Abstraction Interface (Conceptual)
-
-| Subsystem | What It Hides | 32blit Touchpoints | Zephyr Equivalent |
-|-----------|---------------|--------------------|-------------------|
-| Display | Framebuffer address, double-buffer swap, vsync | `blit::screen`, `blit::Surface`, `blit::update` cycle | `display_write()`, `display_set_brightness()` |
-| Input | Button debounce, analog deadzones, touch gestures | `blit::buttons`, `blit::joystick` | GPIO interrupts, Zephyr input subsystem |
-| Time | Fixed timestep source, delta time, frame alpha | `blit::update(uint32_t time_ms)` | `k_uptime_get()`, `k_timer` |
-| Audio | Mixer output format, sample rate, channel volume | SDK audio output (if exposed) | `pdm`, `dac`, or `audio` driver |
-| Storage | Asset loading from flash/SD/host filesystem | `blit::Asset`, filesystem paths | FATFS, `fs_open()`, `fs_read()` |
-
-**Rule:** Game code and editor never call hardware directly. They call the abstraction layer. Also everything in the editor can be done with the gui or by coding, you can do anything from moving tiles, animating sprites, and managing assets through code but the visual editor interfaces the code calls for ease of use. The coding should always be available though. maybe a dynamic "code" panel is available for every item in the editor 
-
----
-
-## 6. Game Loop & Data Flow
+## 3. Architecture
 
 ```mermaid
 flowchart TD
-    Input[Input Platform Abstraction] --> GameLoop[Fixed-Timestep Game Loop]
-    GameLoop --> Systems[ECS Systems: Movement, Physics, AI]
-    Systems --> Commands[Draw Command Buffer]
-    Commands --> Renderer[Renderer Stage: 2D / Raycaster / 3D]
-    Renderer --> Display[Display Platform Abstraction]
-    Display --> Hardware[(Hardware / OS)]
-    GameLoop -.->|interpolation alpha| Renderer
+    Game["Game Code<br>C++ against 32blit API"] --> Libs["Optional SDK Libraries<br>ECS, physics, raycaster, Jet 3D"]
+    Game --> Engine["32blit Engine<br>Surface drawing, sprites, tilemaps, audio, files"]
+    Libs --> Engine
+    Engine --> API["blit::api<br>platform function table"]
+    API --> Z["32blit-zephyr<br>Gen 1 handheld"]
+    API --> SDL["32blit-sdl<br>desktop + browser"]
+    API --> ST["32blit-stm32 / pico<br>existing upstream ports"]
 ```
 
-**Key idea:** The loop never calls `blit::screen` directly. It emits commands. The renderer decides how to batch and flush them based on the active render stage (2D, raycaster, 3D).
+The editor sits beside this stack and talks to it through SDK actions (Section 8).
 
 ---
 
-## 7. Rendering Evolution Path
+## 4. Zephyr Port
+
+`32blit-zephyr` lives in our SDK fork next to the other ports and fills in `blit::api` with Zephyr drivers.
+
+| 32blit needs | Zephyr provides |
+|--------------|-----------------|
+| Screen | Zephyr display driver for the Gen 1 panel |
+| Buttons, joystick | Input subsystem (GPIO keys, ADC) |
+| Time | `k_uptime_get()` |
+| Audio | I2S or DAC driver on its own thread |
+| Files | File system API (FatFS on SD card) |
+| Main loop | A Zephyr thread running the 32blit tick |
+
+Notes:
+
+- **C++:** enable Zephyr's C++17 support and a full C++ standard library in Kconfig.
+- **Screen size:** 320x240, the same as 32blit's hires mode, so existing games run at native resolution.
+- **Game loading:** Phase 1 links each game into the firmware, as the Pico port does. The final design is a Zephyr launcher that loads position-independent games from SD into a game slot in RAM, with a versioned API table and MPU isolation. 32blit's `blit::api` table already follows this model.
+- **Saves:** stored in littlefs on the NOR flash, backed up to SD. The SDK save API hides this from games.
+- **H745 only:** the M4 core can later run audio, input and SD services, leaving the M7 for the game.
+- **Threads:** the game runs on one thread. Audio and asset loading run on their own threads so a slow SD read never stalls a frame.
+- **Loading API:** the SDK offers blocking and async load calls so the same game works with instant flash reads or queued SD reads.
+
+---
+
+## 5. Game Loop and Rendering
+
+32blit already calls `update()` on a fixed 10 ms step and `render()` once per display frame. The SDK keeps that model.
 
 ```mermaid
 flowchart LR
-    S1[Simple 2D<br>Sprites, Rects, Text] --> S2[Complex 2D<br>Atlases, Layers, Particles]
-    S2 --> S3[Raycaster<br>Corridors, Billboards]
-    S3 --> S4[3D<br>Software Rasterizer, Depth]
-    S1 -.->|additive| S2
-    S2 -.->|additive| S3
-    S3 -.->|additive| S4
+    Input --> Update["update()<br>fixed 10 ms step"]
+    Update --> Systems["Game logic / ECS systems"]
+    Systems --> Render["render()<br>draw to blit::screen"]
+    Render --> Present["Present<br>to display"]
 ```
 
-| Stage | Capability | Renderer Additions | Game API Impact |
-|-------|-----------|-------------------|-----------------|
-| **Simple 2D** | Sprites, rectangles, text | Individual draw commands | None — `draw_sprite()`, `draw_rect()` |
-| **Complex 2D** | Atlases, layers, particles, physics debug shapes | Batcher, layer sorter, command merging | Same API; SDK batches internally |
-| **Raycaster** | Doom-style corridors, sprite billboarding | Column emitter, wall shader, z-buffer | New `raycast_scene` component; existing 2D still works |
-| **3D** | Textured cubes, basic models, depth | Jet 3D rasteriser (integer math, RGB565, Gouraud/textured shading, particles, lens flare) | New `transform3d` + `mesh` components; 2D UI sprites still layers on top |
+Drawing goes straight to `blit::screen` as in 32blit today. Batching and command lists are only added inside the stages that need them (raycaster columns, 3D triangles).
 
-**Critical rule:** Each stage is additive. A game built for Stage 1 still compiles and runs under Stage 4.
+The desktop and browser builds use the same software renderer as the hardware, so the preview is pixel-identical to the handheld. The GPU is only used to scale the finished frame to the window and to draw editor overlays on top of it.
+
+### Rendering Stages
+
+Each stage is additive: a Stage 1 game still builds once Stage 4 exists.
+
+| Stage | Adds | Game API |
+|-------|------|----------|
+| 1. Simple 2D | 32blit sprites, shapes, text, tilemaps | Existing `screen.sprite()`, `screen.rectangle()`, `screen.text()` |
+| 2. Complex 2D | Layers, particles, sprite atlases, 2D toolkit below | Same API plus layer helpers |
+| 3. Raycaster | Column renderer, wall/floor shading, per-column depth for sprites | `Raycaster` library; 2D UI still drawn on top |
+| 4. 3D | Jet rasteriser (Section 10) | `transform3d` and `mesh` components; 2D UI on top |
+
+For Stage 3, [KrisRaycaster](https://github.com/krisp3t/KrisRaycaster) is a useful reference: a Wolfenstein-style raycaster running at 60 FPS in under 1 MB RAM on an STM32H750 at 480x272 with DMA2D (no license is published, so treat it as reference rather than reusable code).
+
+### 2D Toolkit
+
+The pieces most games need beyond drawing. Simple 2D tools work with plain 32blit or as ECS components; advanced tools build on the ECS.
+
+| Feature | Simple 2D | Advanced 2D |
+|---------|-----------|-------------|
+| Animation | Frame-based sprite animation | Tweens, animation state machines |
+| Camera | Follow target, world bounds | Shake, zoom zones, parallax control |
+| UI | Text, menus, basic HUD | Layout library: dialog boxes, panels, HUD anchoring |
+| Scenes | Switch scene, fade transition | Additive scenes, streamed levels from SD |
+| Save data | Save/load a fixed struct | Save any registered component |
+| Events | Collision and input callbacks | Named events and signals between entities |
+| AI | - | Grid A* pathfinding over tilemaps |
+| Physics | - | AABB/circle physics (Section 7) |
+| Effects | - | Particles, layers |
 
 ---
 
-## 8. Entity / Component Model (High Level)
+## 6. Entity / Component Model (Optional Library)
+
+A light ECS: fixed-capacity component pools, components as plain structs, systems as plain functions. No heap allocation during play and no heavy template machinery, so code size stays small on the MCU.
 
 | Concept | Purpose | Example |
 |---------|---------|---------|
-| **Entity** | An ID only. No data, no logic. | Player #42, Enemy #7 |
-| **Component** | Pure data. No methods. | `Transform`, `Sprite`, `Velocity`, `Collider`, `TagPlayer` |
-| **System** | Logic that runs on entities matching a component signature | `MovementSystem`, `RenderSystem`, `PhysicsSystem`, `InputSystem` |
-| **Scene** | A named container of entities and prefabs | `Level1`, `MainMenu`, `PauseMenu` |
-| **Prefab** | Reusable entity template | `PlayerPrefab`, `CoinPrefab` |
+| Entity | An ID only | Player #42 |
+| Component | Plain data | `Transform`, `Sprite`, `Velocity`, `Collider` |
+| System | Function over entities with matching components | `move()`, `draw_sprites()` |
+| Scene | Named set of entities | `Level1`, `MainMenu` |
+| Prefab | Reusable entity template | `CoinPrefab` |
 
-**Game developer experience:** "Add a `Transform` and `Sprite` component to an entity; the `RenderSystem` picks it up automatically."
+Why this model:
+
+- **Simple start:** beginners attach built-in components (`Transform`, `Sprite`, `Collider`) and the SDK's systems do the work.
+- **Room to grow:** new features are new components and systems. Nothing existing changes.
+- **Editor support for free:** the editor works with any registered component, including ones a game defines itself.
+
+Games that don't want ECS use plain 32blit and skip this library.
+
+### Component Registry
+
+Each component type registers its name and fields with the SDK. This is what lets the editor, the console and scene files read and change any component without knowing its type in advance.
+
+```cpp
+SDK_COMPONENT(Transform, x, y, rotation);
+SDK_COMPONENT(Health, current, max);
+```
 
 ---
 
-## 9. Physics Integration (Advanced 2D)
+## 7. Physics (Optional Library)
 
-Physics is an SDK-owned system, not something every game writes from scratch.
+| Concern | SDK | Game Developer |
+|---------|-----|----------------|
+| Broadphase | Spatial grid | Mark entities collidable |
+| Narrowphase | AABB, circle | Set collision layers and masks |
+| Resolution | Position correction | Decide what a hit does |
+| Raycasts | Line of sight, shots | Call `physics.raycast()` |
+| Debug draw | Collider outlines | Toggle a flag |
 
-| Concern | SDK Responsibility | Game Developer Responsibility |
-|---------|-------------------|-------------------------------|
-| Broadphase collision | Spatial grid / quadtree | Tag entities as collidable |
-| Narrowphase | AABB, circle, oriented rectangle | Set collision layers and masks |
-| Resolution | Position correction, impulse response | Define what happens on hit (damage, bounce, trigger) |
-| Raycast queries | For line-of-sight, gunshots, grappling hooks | Call `physics.raycast()` in game logic |
-| Debug rendering | Draw collision shapes in editor colors | Toggle debug flag |
-
-**Expansion note:** A simple 2D game might use only AABB checks. A complex 2D platformer can enable full rigid-body dynamics without changing the entity structure — only the physics system configuration changes.
+The solver is written in-house: AABB, circles and tilemap collision. Platformers and top-down games need tight, predictable tile collision more than realistic physics. If rigid bodies are needed later, Box2D (MIT) can sit behind the same interface.
 
 ---
 
-## 10. Editor Architecture
+## 8. Editor
 
-The editor is a **separate process** that runs on desktop — never on the STM32. It is written once in **Dear ImGui + SDL2 (C++)** and compiled to two targets:
+The editor is a desktop tool (Dear ImGui + SDL2, C++).
 
-- **Native binary** (Windows/Linux/Mac) — standard desktop app, full performance
-- **WASM in the browser** — same C++ code compiled via Emscripten, running ImGui over WebGL/SDL2
+### Use Existing Tools for Content
 
-There is **no second codebase**. The editor UI, code panel, REPL, and scene tools are the same C++ ImGui code in both cases. MicroPython and the SDK preview can also compile to WASM for in-browser execution.
+| Content | Tool | Into the game via |
+|---------|------|-------------------|
+| Tilemaps | Tiled or LDtk | 32blit `map` tool |
+| Sprites, animation | Aseprite | 32blit `image` tool + animation metadata |
+| Fonts | TTF | 32blit `font` tool |
+
+The editor covers what these tools can't: live preview, entity inspector, console and debug overlays. A built-in tilemap or sprite editor is only worth building if the external tools fall short.
+
+### How the Editor Talks to the SDK
 
 ```mermaid
 flowchart LR
-    Editor["Editor Process<br>Dear ImGui + SDL2 (C++)"] -->|writes scene data| SceneFiles[(Scene Files<br>JSON/YAML/Binary)]
-    SceneFiles -->|reads| AssetPipeline[Asset Pipeline<br>Importer + Packer]
-    AssetPipeline -->|produces| GameData[(Game-Ready Assets<br>Handles + Blobs)]
-    GameData -->|consumes| SDK[SDK Framework<br>ECS, Physics, Renderer]
-    SDK --> Game[Game Code<br>Systems + Logic]
-    Game -->|displays| Display[(Display)]
+    GUI[Editor GUI] --> Actions["SDK Actions<br>spawn, set, place_tile, play_anim"]
+    Console[Console] --> Actions
+    Scene[(Scene files)] --> Actions
+    Actions --> Registry[Component Registry] --> State["Game state<br>owned by SDK"]
 ```
 
-**Deployment targets:**
-
-| Target | Build | Notes |
-|--------|-------|-------|
-| **Desktop native** | MSVC / GCC / Clang | Full performance, direct file system access |
-| **Browser (WASM)** | Emscripten (em++) | Same code; file I/O via browser File API / IndexedDB; no install required |
-
-| Editor Responsibility | SDK Responsibility |
-|----------------------|-------------------|
-| Visual placement of entities | Runtime entity spawning from scene data |
-| Editing component properties | Validating component types |
-| Importing PNG/TMX/WAV | Providing the importer CLI and format specs |
-| Previewing a scene | Providing a headless render mode |
-| Generating asset IDs/headers | Consuming generated headers in game code |
-
-**Key rule:** The editor writes data files. The SDK reads them. The editor does not compile or link against game logic.
-
-### Editor Workflow: GUI + Code
-
-Everything in the editor can be done through the GUI **or** through code. The visual editor interfaces the same SDK calls that scripts use, so there is a single source of truth — no divergence between "GUI state" and "code state."
-
-**Code Panel:** Every item in the editor has an associated code panel showing the Python/SDK calls that correspond to the GUI action. Devs can read it to learn the API, edit it directly, or use it as a starting point for scripts.
-
-**Live Console (REPL):** The editor exposes a MicroPython REPL connected to the preview instance. Devs type commands and see results immediately — no save, no compile, no restart.
+- **SDK actions:** a fixed list of operations (spawn entity, set property, place tile, play animation). The GUI, the console and scene loading all call the same list.
+- **Scene files are the source of truth.** Editor changes are saved as scene data.
+- **Everything configurable is data.** Anything a designer sets up (animation state machines, event connections, UI layouts, camera zones) is a registered component or asset file, never only hard-coded C++. Code and editor both read and write it. Runtime calls such as starting a tween or requesting a path stay in code.
+- **Code panel:** each item shows the equivalent C++ call or scene entry for the current GUI action.
+- **Console:** short commands that map straight to actions:
 
 ```
->>> player.set_position(x=200, y=150)
->>> game.spawn("enemy", type="jet", x=300, y=100)
->>> physics.apply_force(player, fx=10, fy=-5)
+> spawn enemy 300 100
+> set player.Transform.x 200
 ```
 
-**Hot Reload:** Editing a script in the code panel and saving triggers an automatic module reload. The preview instance picks up the new logic on the next frame. Entity state (positions, health, etc.) is preserved across reloads — only the logic changes.
+### Preview and Hot Reload
 
-**No compile step for scripts.** MicroPython is interpreted; the file is read and executed directly. `@micropython.native` functions are compiled to ARM machine code transparently at first call — the developer never sees a build tool.
+On desktop, the game builds as a shared library that the editor loads. Game state lives in SDK-owned storage, not in the game library, so the library can be rebuilt and reloaded while the game keeps running.
 
-| Workflow | Steps | Speed |
-|----------|-------|-------|
-| Tweak a value | REPL command | Instant |
-| Edit game logic | Save → hot reload | <1 second |
-| Edit scene/asset | Save → preview updates | <1 second |
-| Ship to hardware | Bundle scripts → C++ build → flash | Minutes |
-| Edit C++ system | Build → link → flash | Minutes |
+| Change | Steps | Turnaround |
+|--------|-------|------------|
+| Tweak a value | Inspector or console | Instant |
+| Scene or asset | Save, preview reloads | About a second |
+| Game logic (C++) | Rebuild library, editor reloads it | A few seconds |
+| Ship to hardware | Build, copy to SD (or flash in Phase 1) | Minutes |
 
-### Editor-as-Consumer Boundary
+On hardware the game runs natively from the game slot, so there's no reload overhead.
 
-The editor **never links against game code**. It only calls SDK APIs. Both the editor and the game call the same SDK functions — the editor calls them in preview mode (sandboxed, no real game state), and the game calls them for real.
+### Browser
 
-Scripts written in the editor's code panel are **exported to the game project** — the game runs them on hardware, not the editor. The editor produces data; the game consumes it.
+| Part | Browser support |
+|------|-----------------|
+| Games | Ready now: the 32blit SDL port already builds with Emscripten. |
+| Editor UI, preview, inspector, console | Straightforward: ImGui, SDL2 and the SDK all build with Emscripten. File access goes through IndexedDB. |
+| Compiling C++ game code | Not in the browser. Code is built locally or by a build server, and the browser loads the resulting WASM. |
+
+Keep the editor Emscripten-friendly from the start (no blocking main loop, file I/O behind an interface) so the browser build stays a build target, not a port.
+
+---
+
+## 9. Performance on STM32 + Zephyr
+
+Zephyr adds little overhead. Speed comes from how the hardware is used:
+
+| Technique | Benefit |
+|-----------|---------|
+| DMA2D (Chrom-ART) | Hardware fills, blits and pixel-format conversion; CLUT mode expands 8-bit tiles to RGB565 |
+| ITCM/DTCM placement | Hot loops and data in zero-wait-state memory |
+| CPU caches on | Large gain for code and data in AXI SRAM or external memory |
+| `-O2` + LTO | Smaller, faster binaries |
+| Fixed-point maths | Predictable cost in physics and the raycaster |
+
+### Memory Budget
+
+The chip is either an STM32H745 (~1 MB SRAM, 2 MB flash) or an STM32H7R7 (620 KB SRAM, external NOR flash). The H7R7 needs external SDRAM; the H745 may ship without it. RAM size is not fixed.
+
+| Memory | Holds |
+|--------|-------|
+| ITCM / DTCM | Hot loops (Jet raster, audio mixer), stacks, hot game state |
+| AXI SRAM | Framebuffer, 320x240 RGB565 (150 KB), Jet depth buffer (150 KB), hot texture cache |
+| External SDRAM (if fitted) | Game slot (code + assets), heap (atlases, audio, game heap), staging (level streaming) |
+| NOR / internal flash | Zephyr + launcher, system assets, saves |
+| SD card | Game library, save backups |
+
+The game slot size is part of the game ABI and is fixed once the RAM size is known. Bigger games stream levels from SD through the staging area. Without external RAM (H745 only), games run from flash and the heap and staging areas shrink into SRAM.
+
+### Frame Budget (60 FPS = 16.6 ms, targets to validate)
+
+| Work | Target |
+|------|--------|
+| Game logic + ECS + physics | 3-5 ms |
+| Rendering | 6-9 ms |
+| Audio, present, slack | 2-3 ms |
+
+Tooling: Tracy for frame timing on desktop, an on-device FPS and frame-time overlay, a heap view and a draw-call counter.
+
+---
+
+## 10. 3D Rendering: Jet
+
+Stage 4 uses [Jet](https://github.com/CubeCoders/Jet), an MIT-licensed, dependency-free C++17 software rasteriser that targets ESP32 and STM32.
+
+- Integer arithmetic in the rasterisation hot path, RGB565 output
+- Flat, Gouraud, Phong and textured shading; optional Z-buffer or painter's sort
+- Particles, lens flare, 2D sprite overlay, OBJ loader
+- Half-width and interlaced buffer modes to save RAM
+- Features toggle at compile time to cut flash, RAM and CPU
+
+Triangle budgets are not measured yet. A Jet benchmark on H745- and H7R7-class dev boards sets them.
+
+---
+
+## 11. Asset Pipeline
 
 ```mermaid
 flowchart LR
-    subgraph Editor["Editor (Desktop Native or Browser)"]
-        CodePanel["Code Panel<br>Python + SDK Calls"] --> Preview["Preview Instance<br>MicroPython + SDK"]
-        REPL["Live Console<br>REPL"] --> Preview
-        SceneEd["Scene Editor<br>Visual GUI"] --> Preview
-    end
-    Preview -->|"writes scene files<br>+ scripts"| GameProject["Game Project<br>JSON + .py scripts"]
-    GameProject -->|"flashed to"| Game["Game Runtime<br>STM32 / Desktop"]
+    Src["Source<br>Tiled, Aseprite, WAV, TTF"] --> Tools["32blit tools<br>map, image, font, pack"] --> Out["Packed assets<br>C arrays or SD files"] --> Load["Runtime handles"]
 ```
 
----
-
-## 11. Scripting Layer (MicroPython)
-
-The SDK uses **MicroPython** as its scripting language for game logic. This replaces the traditional "write C++ and recompile" workflow with an interpreted, hot-reloadable scripting model.
-
-### Why MicroPython
-
-| Factor | MicroPython | Lua | Python (CPython) | C++ only |
-|--------|------------|-----|-----------------|----------|
-| **Developer familiarity** | Python — taught in schools everywhere | Niche, game-dev only | Python — universal | Requires C++ knowledge |
-| **Flash size (STM32)** | ~256–512KB | ~200KB | ~1–2MB (impractical) | 0KB |
-| **REPL / live coding** | Built-in | Not built-in | Built-in but too heavy | None |
-| **Optimization path** | `@micropython.native` → ARM code | Rewrite in C++ | Slow everywhere | Full control |
-| **Browser (WASM)** | Working ports | Fengari/lua.js | Pyodide (~10MB) | No |
-| **STM32 support** | Official port | Via C API | Impractical | Native |
-| **Determinism** | GC nondeterministic (manageable) | Fully deterministic | GC nondeterministic | Full control |
-
-**Decision:** MicroPython wins on accessibility, REPL support, cross-platform reach, and the `@micropython.native` optimization path. Its GC nondeterminism is manageable with the strategies in Section 12.
-
-### Layered API
-
-Scripts interact with the SDK through a layered API — devs choose their abstraction level per use-case:
-
-| Level | Abstraction | Example | Audience |
-|-------|------------|---------|----------|
-| **1 — High-level** | Game-domain functions | `game.spawn("enemy", x, y)`, `ai.patrol(entity)` | Beginners, prototyping |
-| **2 — Mid-level** | ECS queries, component access | `for e in query(Transform, Velocity): ...` | Intermediate |
-| **3 — Low-level** | Math, memory, primitives | `math.sin()`, `memory.alloc()` | Advanced, optimization |
-
-Advanced devs can also write **custom C++ systems** and expose them to MicroPython — there is no ceiling. `@micropython.viper` provides C-level performance with Python syntax for the hottest script code.
-
-### Developer Freedom Spectrum
-
-```
-Most safe / constrained                          Most free / dangerous
-      │                                                │
-   JSON ──── MicroPython ──── @native/@viper ──── C++ (raw)
-   (data)    (logic via SDK     (compiled Python,  (bypass SDK,
-              API)               closer to C)       direct hardware)
-```
-
-- **JSON** — configure, don't create. Safe for modders and non-programmers.
-- **MicroPython** — full game logic through SDK APIs. Sandbox prevents memory corruption and hardware access.
-- **`@micropython.native`** — compiles hot functions to ARM Thumb-2 at runtime (~5–10× faster). Optimization without leaving the language.
-- **`@micropython.viper`** — C-level performance with type annotations. Powerful but dangerous; for advanced devs only.
-- **C++ escape hatch** — any Python-accessible function can also be a C++ system. No ceiling.
-
-### SDK Weight
-
-| Component | Flash | RAM |
-|-----------|-------|-----|
-| MicroPython VM (stripped) | ~256–512KB | ~32–64KB |
-| C++ SDK (ECS, physics, renderer) | ~200–400KB | ~100–200KB |
-| Game code + assets | Varies | Varies |
-| **STM32H7 total (2MB flash, 1MB RAM)** | **~1–1.5MB** | **~256–512KB** |
-
-MicroPython modules can be stripped (`urllib`, `socket`, etc.) to reduce flash usage. The baseline is acceptable for STM32H7's 2MB flash budget.
-
-### Cross-Platform
-
-| Platform | MicroPython | Notes |
-|----------|------------|-------|
-| **STM32H7** | Official port | Battle-tested |
-| **Windows / Linux / Mac** | Desktop ports | Full support; same scripts as embedded |
-| **Browser** | WASM ports | Enables the **editor** to run in a browser (see below) |
-| **Zephyr RTOS** | Via C API | Community port |
-
-One language runs on every target. The same script prototypes on desktop and flashes to STM32 without changes.
-
-### Browser-Based Editor
-
-The editor can optionally run in a **browser** as a web application, without requiring a native desktop install. **Dear ImGui compiles to WASM via Emscripten** — the same C++ editor code runs natively on desktop and in the browser over WebGL/SDL2. MicroPython's WASM ports allow the preview instance (MicroPython + SDK) to run in-browser alongside the editor.
-
-**Architecture options:**
-
-| Model | Editor UI | Preview Runtime | Tradeoff |
-|-------|-----------|-----------------|----------|
-| **Full WASM in browser** | ImGui compiled to WASM via Emscripten | MicroPython + SDK compiled to WASM | No local install; one codebase; preview performance ~70–90% of native |
-| **WASM editor + local server** | ImGui compiled to WASM via Emscripten | Local native process (C++ + MicroPython) | Best preview performance; requires local helper process |
-| **WASM editor + WebSocket preview** | ImGui compiled to WASM via Emscripten | Native preview streams frames over WebSocket | Native preview quality; adds network latency |
-
-**Recommended path:** Start with the native desktop build (Phase 1–2, simplest). The WASM browser build comes nearly for free once the codebase is Emscripten-clean — same ImGui code, same SDK, same MicroPython scripts. Full-WASM (everything in browser) is the simplest deployment: host the WASM bundle on a static server and open a URL.
-
-**Browser considerations:**
-
-- **File I/O:** Browser File API and IndexedDB replace direct file system access. Emscripten's MEMFS/IDBFS provides a virtual file system that persists to IndexedDB.
-- **Performance:** WASM typically runs at ~70–90% of native speed. The editor UI is ImGui (GPU-light), so this is rarely a bottleneck. Preview rendering runs in WebGL.
-- **No install:** Devs open a URL and start editing. Especially valuable for education and collaborative workflows.
-- **Distributing updates:** Host a new WASM bundle — no installer, no version conflicts.
+The existing `32blit` tools are reused or wrapped rather than replaced.
 
 ---
 
-## 12. Determinism & Performance
+## 12. Roadmap
 
-### Fixed Timestep & Script Execution
-
-Game logic (including MicroPython scripts) runs on a deterministic fixed-timestep clock. Scripts execute inside the game loop tick, not in real-time. The same input produces the same output every run.
-
-### GC Determinism Strategies
-
-MicroPython's garbage collector is nondeterministic — it can pause execution at arbitrary points. On a 60 FPS target (16.6 ms budget), mitigations include:
-
-1. **`gc.collect()` at frame boundaries** — trigger collection during predictable moments (end of frame, loading screens).
-2. **`gc.disable()` during critical sections** — prevent pauses during physics, rendering, or timing-sensitive logic.
-3. **Pre-allocate objects** — use spawn pools; avoid runtime allocation during gameplay.
-4. **Seeded RNG** — provide `sdk.random()` with a deterministic seed. Never expose raw `random` to scripts.
-
-For most 2D games, this is sufficient. For precision-timing games (rhythm, fighting), the C++ escape hatch handles the timing-critical logic.
-
-### Performance Budget (60 FPS = 16.6 ms)
-
-| Component | Budget | Language |
-|-----------|--------|----------|
-| ECS systems | ~5–8 ms | C++ |
-| Physics | ~2–4 ms | C++ |
-| MicroPython callbacks | ~0.1–1 ms | MicroPython |
-| Command buffer flush | ~1–2 ms | C++ |
-| Platform output | ~0.5 ms | C++ |
-
-**The hot path stays in C++.** Scripts run at decision points ("what does the AI do?", "what happens on collision?"), not per-pixel or per-triangle. ~50–200 script calls per frame is negligible even on interpreted MicroPython.
-
-### 3D Rendering: Jet
-
-For Phase 4 (3D), the SDK integrates **[Jet](https://github.com/cubecoders/jet)** — a tiny, dependency-free, fixed-function 3D software rasteriser in C++17:
-
-- **Integer arithmetic** in the rasterisation hot path — optimal for MCUs
-- **RGB565 output** — matches STM32H7 display natively
-- **~100k tris/sec on ESP32-S3** — STM32H7 at 480 MHz estimated 200–400k tris/sec
-- **Flat, Gouraud, and textured** shading; depth buffer, culling, particles, lens flare
-- **MIT license** — no restrictions
-
-MicroPython handles game logic (flight models, AI, scene composition) while Jet handles rendering (rasterisation, depth, shading). The SDK wraps Jet's API and exposes it to scripts.
-
-| Scenario | Triangles | Estimated FPS (STM32H7) |
-|----------|-----------|------------------------|
-| Simple jet + terrain | ~5k | ~60 |
-| Dogfight, 4 jets + clouds | ~15k | ~40–50 |
-| Complex scene | ~30k | ~20–30 |
-
-### Optimization Tools for Developers
-
-| Tool | What it shows | How devs use it |
-|------|--------------|-----------------|
-| **Tracy profiler** | Frame-by-frame timing | Find bottleneck system |
-| **Script profiler** | Per-function MicroPython timing | Find slow script → add `@micropython.native` or rewrite in C++ |
-| **Memory dashboard** | Heap usage, fragmentation | Fix allocation patterns |
-| **Draw call counter** | Batched command count | Optimize rendering |
-| **Hot-reload** | Edit → see change in <1 s | Rapid iteration |
-| **REPL** | Live state inspection | Debug entity state mid-game |
-
-**Optimization path:** interpreted → `@micropython.native` (5–10×) → `@micropython.viper` (C-level) → custom C++ system (maximum).
+| Phase | Target | SDK | Editor | Learning curve |
+|-------|--------|-----|--------|----------------|
+| 1 | Zephyr port + simple 2D | `32blit-zephyr`, asset pipeline with Tiled/Aseprite | None yet; desktop SDL build for testing | Hours |
+| 2 | Editor core + simple 2D toolkit | SD launcher, SDK actions, component registry, ECS, sprite animation, camera, basic UI, scene switching, simple saves | Preview, inspector, console, code panel, hot reload | Days |
+| 3 | Complex 2D | Physics, layers, particles, audio mixer, tweens, animation state machines, events, UI layouts, pathfinding, streamed levels | Physics debug view, animation state editor, UI layout editor | Days to weeks |
+| 4 | Raycaster | Column renderer, wall/floor shading | Raycaster level view | Weeks |
+| 5 | 3D | Jet integration, 3D transforms | 3D preview, gizmos | Weeks to months |
 
 ---
 
-## 13. Asset Pipeline (Conceptual)
+## 13. Ease-of-Use Checklist
 
-| Stage | Tool | Output |
-|-------|------|--------|
-| Source | PNG, TMX, WAV, TTF | Artist/designer files |
-| Import | SDK importer (CLI or editor button) | Optimized binary blobs + metadata |
-| Bundle | Asset packer | Packed archive or embedded C array |
-| Load | SDK asset loader at runtime | Handles and pointers to live data |
-
-**32blit touchpoint:** The existing `32blit` CLI already does `image`, `font`, `map`, and `pack` conversions. The SDK editor should reuse or wrap those tools rather than replace them.
-
----
-
-## 14. Zephyr RTOS Considerations
-
-| Concern | Bare Metal (32blit HAL) | Zephyr RTOS |
-|---------|------------------------|-------------|
-| Game loop | Super-loop in `main()` | High-priority thread or `k_timer` |
-| Input | Poll buttons each frame | GPIO interrupt → message queue → game thread |
-| Display | Direct framebuffer write | Zephyr `display` API + semaphore sync |
-| Audio | Direct DMA or PWM | `audio` or `dac` driver + buffer thread |
-| Asset load | Blocking flash read | Background thread loads via `fs_read()` into `k_msgq` |
-| Memory | Static pools + SDRAM | Zephyr heap + memory partitions |
-| Multi-tasking | None | Audio, loader, and game can run as separate threads |
-
-**Architecture impact:** The platform abstraction layer must expose blocking vs. non-blocking load calls so the same game code works whether storage is instant (bare metal flash) or queued (Zephyr SD card thread).
+- [ ] Existing 32blit examples and boilerplate run on Gen 1 unchanged.
+- [ ] A moving sprite is a few lines of 32blit code, or one entity with two components.
+- [ ] Levels are made in Tiled or the editor, not in code.
+- [ ] Every GUI action has an equivalent code call or console command.
+- [ ] C++ logic changes hot reload in the editor preview.
+- [ ] Debug overlay for colliders, draw calls and FPS.
+- [ ] One project folder builds for desktop, browser and hardware.
 
 ---
 
-## 15. Expansion Roadmap Table
+## 14. Open Questions
 
-| Phase | Target | New SDK Modules | New Editor Features | Game Dev Learning Curve |
-|-------|--------|----------------|---------------------|------------------------|
-| **1** | Simple 2D + Scripting | Sprite renderer, fixed loop, basic input, MicroPython VM + REPL | Scene viewer, sprite importer, animator, simple one-layer tile map editor, code panel, live console | Hours — one rectangle on screen |
-| **2** | Complex 2D | ECS, physics, tilemap renderer, audio mixer, `@micropython.native` | Multi-layer tilemap editor, physics debug view, hot-reload | Days — components and systems |
-| **3** | Raycaster | Column renderer, wall/floor shading | Raycaster level editor | Weeks — 2.5D concepts |
-| **4** | 3D (Jet) | Jet 3D rasteriser (integer math, RGB565, Gouraud/textured), depth buffer, 3D transforms, particles | Basic 3D scene preview, 3D gizmos | Weeks to months — 3D math |
+1. **Gen 1 MCU:** H745 or H7R7? Decided by the Jet benchmark.
+2. **Launcher loader:** Zephyr LLEXT or a custom loader for SD games?
+3. **H745 M4 core:** system services only, or exposed to games?
+4. **Jet and 2D:** Does Jet own the whole frame in Stage 4, or run beside 2D drawing?
 
 ---
 
-## 16. Ease-of-Use Checklist for Game Developers
+## 15. Next Step
 
-- [ ] One function to start: `game.init()`, `game.update(dt)`, `game.render(alpha)`.
-- [ ] No manual memory management for assets; use handles.
-- [ ] Adding a moving sprite = adding two components to one entity.
-- [ ] Changing a level = editing a scene file in the editor, not recompiling.
-- [ ] Changing game logic = editing a MicroPython script, saving, and seeing the result hot-reloaded in <1 second.
-- [ ] No compile step for scripts — edit, save, see result. `@micropython.native` compiles transparently at first call.
-- [ ] REPL available for live experimentation: spawn entities, tweak values, inspect state without restarting.
-- [ ] Code panel shows the Python/SDK calls behind every GUI action — GUI and code are two views of the same thing.
-- [ ] Debug overlay toggle shows physics shapes, draw calls, and FPS without code changes.
-- [ ] Same project folder opens on desktop simulator and flashes to hardware.
-- [ ] Scripts written in the editor run unchanged on STM32 hardware.
+1. Create `32blit-zephyr` in the SDK fork: display, input, time and a main-loop thread.
+2. Run an unmodified 32blit example on an H745- or H7R7-class dev board.
+3. Set the SDL build to the Gen 1 memory limits.
+4. Add audio and file access to the port.
+5. Confirm the asset pipeline with one Tiled map and one Aseprite sprite.
+6. Measure frame time and memory against Section 9.
 
----
-
-## 17. Open Questions & Further Research
-
-1. **Render backend:** Should Stage 1 use OpenGL ES on desktop for hardware acceleration, or pure software rendering to match the STM32H7?
-2. **Physics library:** Write a minimal AABB/circle solver in-house, or integrate a lightweight 2D physics engine behind the SDK interface?
-3. **ECS vs. traditional OOP:** Is a full ECS worth the complexity for games that may never have more than 50 entities? Consider a hybrid "light ECS."
-4. **Zephyr threading model:** Should the game loop be a Zephyr thread, or should Zephyr simply provide the PAL while the game runs in a super-loop?
-5. **MicroPython integration depth:** How much of the SDK API is exposed to scripts in Phase 1 vs. later phases? Start with high-level only, or expose mid-level ECS queries immediately?
-6. **Sandbox scope:** Which MicroPython modules are allowed in the sandbox? How strict is the import whitelist?
-7. **GC tuning:** What GC thresholds and collection points work best on STM32H7? Need empirical testing with representative game loads.
-8. **Asset hot-reload:** Can the desktop simulator reload a changed PNG without restarting the game?
-9. **Save game abstraction:** Where does save data live — flash sectors, SD card, or desktop file? How does the SDK virtualize this?
-10. **Jet integration:** Should Jet replace the 2D renderer entirely at Phase 4, or coexist as a separate 3D-only path alongside the 2D batcher?
-11. **Emscripten readiness:** How much of the editor codebase needs to change to be Emscripten-clean? File I/O, threading, and dynamic allocation paths need auditing. Should Emscripten compatibility be a Phase 1 constraint or added later?
-
----
-
-## 18. Immediate Next Step for SDK Team
-
-Prototype **Phase 1** on the desktop simulator only:
-
-1. Platform abstraction interface (display, input, time).
-2. Fixed-timestep game loop.
-3. Minimal draw command buffer (sprite, rect, text).
-4. **MicroPython VM embedded** with SDK API bindings and REPL.
-5. One sample game: a moving rectangle with input, scripted in MicroPython.
-6. Editor prototype: code panel + live console connected to the preview instance.
-
-Once Phase 1 compiles on Windows via SDL2, runs on 32blit hardware via the HAL, and MicroPython scripts execute in the editor's preview with hot-reload, the team has a contract to build Phase 2 (ECS + physics + complex 2D + `@micropython.native`) against.
-
----
-
-
+Phase 1 is done when a 32blit example builds for desktop via SDL2 and runs on Zephyr hardware from the same project folder.
