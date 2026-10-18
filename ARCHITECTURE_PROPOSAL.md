@@ -106,7 +106,7 @@ flowchart LR
 | **Simple 2D** | Sprites, rectangles, text | Individual draw commands | None — `draw_sprite()`, `draw_rect()` |
 | **Complex 2D** | Atlases, layers, particles, physics debug shapes | Batcher, layer sorter, command merging | Same API; SDK batches internally |
 | **Raycaster** | Doom-style corridors, sprite billboarding | Column emitter, wall shader, z-buffer | New `raycast_scene` component; existing 2D still works |
-| **3D** | Textured cubes, basic models, depth | Jet 3D rasteriser (integer math, RGB565, Gouraud/textured shading, particles, lens flare) | New `transform3d` + `mesh` components; 2D UI still layers on top |
+| **3D** | Textured cubes, basic models, depth | Jet 3D rasteriser (integer math, RGB565, Gouraud/textured shading, particles, lens flare) | New `transform3d` + `mesh` components; 2D UI sprites still layers on top |
 
 **Critical rule:** Each stage is additive. A game built for Stage 1 still compiles and runs under Stage 4.
 
@@ -144,9 +144,11 @@ Physics is an SDK-owned system, not something every game writes from scratch.
 
 ## 10. Editor Architecture
 
+The editor is a **separate process** that runs on desktop — never on the STM32. It can be delivered as either a **native app** (Dear ImGui + SDL2) or a **web app** running in the browser (Phase 3+). Both share the same SDK API and data formats.
+
 ```mermaid
 flowchart LR
-    Editor[Editor Process<br>Dear ImGui + SDL2] -->|writes scene data| SceneFiles[(Scene Files<br>JSON/YAML/Binary)]
+    Editor["Editor Process<br>Native (ImGui+SDL2)<br>or Web (Browser)"] -->|writes scene data| SceneFiles[(Scene Files<br>JSON/YAML/Binary)]
     SceneFiles -->|reads| AssetPipeline[Asset Pipeline<br>Importer + Packer]
     AssetPipeline -->|produces| GameData[(Game-Ready Assets<br>Handles + Blobs)]
     GameData -->|consumes| SDK[SDK Framework<br>ECS, Physics, Renderer]
@@ -198,7 +200,7 @@ Scripts written in the editor's code panel are **exported to the game project** 
 
 ```mermaid
 flowchart LR
-    subgraph Editor["Editor (Desktop Only)"]
+    subgraph Editor["Editor (Desktop Native or Browser)"]
         CodePanel["Code Panel<br>Python + SDK Calls"] --> Preview["Preview Instance<br>MicroPython + SDK"]
         REPL["Live Console<br>REPL"] --> Preview
         SceneEd["Scene Editor<br>Visual GUI"] --> Preview
@@ -272,10 +274,26 @@ MicroPython modules can be stripped (`urllib`, `socket`, etc.) to reduce flash u
 |----------|------------|-------|
 | **STM32H7** | Official port | Battle-tested |
 | **Windows / Linux / Mac** | Desktop ports | Full support; same scripts as embedded |
-| **Browser** | WASM ports | Maturing; enables future web editor/preview |
+| **Browser** | WASM ports | Enables the **editor** to run in a browser (see below) |
 | **Zephyr RTOS** | Via C API | Community port |
 
 One language runs on every target. The same script prototypes on desktop and flashes to STM32 without changes.
+
+### Browser-Based Editor
+
+The editor can optionally run in a **browser** as a web application, rather than requiring a native desktop install. MicroPython's WASM ports make this possible — the preview instance (MicroPython + SDK) can run in-browser alongside the editor UI.
+
+**Architecture options:**
+
+| Model | Editor UI | Preview Runtime | Tradeoff |
+|-------|-----------|-----------------|----------|
+| **Web editor + local server** | HTML/JS in browser | Local native process (C++ + MicroPython) | Best preview performance; requires local helper process |
+| **Full WASM in browser** | HTML/JS in browser | WASM-compiled SDK + MicroPython in-browser | No local install; preview performance limited by WASM |
+| **Hybrid** | HTML/JS in browser | Local native preview + WASM for quick edits | Best balance; more complex to build |
+
+**Recommended path:** Start with the native ImGui editor (Phase 1–2, best performance and simplest architecture). Add a web-based editor option in Phase 3+ using the same SDK API bindings, with MicroPython WASM for in-browser preview. The editor UI would be HTML/JavaScript; the SDK and scripting runtime compile to WASM via Emscripten.
+
+**Key benefit:** A browser-based editor lowers the barrier to entry — devs can open a URL and start editing without installing anything. This is especially valuable for education and collaborative workflows.
 
 ---
 
@@ -409,6 +427,7 @@ MicroPython handles game logic (flight models, AI, scene composition) while Jet 
 8. **Asset hot-reload:** Can the desktop simulator reload a changed PNG without restarting the game?
 9. **Save game abstraction:** Where does save data live — flash sectors, SD card, or desktop file? How does the SDK virtualize this?
 10. **Jet integration:** Should Jet replace the 2D renderer entirely at Phase 4, or coexist as a separate 3D-only path alongside the 2D batcher?
+11. **Browser editor model:** When the web-based editor is added (Phase 3+), should the preview run fully in-browser via WASM, or via a local server process? What's the latency budget for the WebSocket bridge?
 
 ---
 
