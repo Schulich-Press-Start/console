@@ -22,7 +22,7 @@
 
 1. **Build on the 32blit API.** Games are written against the existing 32blit C++ API. Our SDK adds a Zephyr port and optional libraries; it does not replace the engine.
 2. **One API, many ports.** Games never touch hardware. The 32blit engine calls a function table (`blit::api`) that each platform fills in. Zephyr is one more port next to `32blit-stm32`, `32blit-pico` and `32blit-sdl`.
-3. **32blit examples run on the SDK.** Existing 32blit examples and games build and run on Gen 1 and desktop without changes. Any deliberate break from this is documented.
+3. **32blit examples run on the SDK.** Existing 32blit examples and games build and run on the handheld and desktop without changes. Any deliberate break from this is documented.
 4. **Pay for what you use.** ECS, physics, raycaster and 3D are separate libraries. A simple game links none of them.
 5. **Data-driven content.** Levels, sprites and entity definitions are asset files. Code handles behaviour, data handles content.
 6. **The editor drives the SDK.** The editor has no logic of its own. Every GUI action is an SDK action that code can also call.
@@ -37,7 +37,7 @@ flowchart TD
     Game --> Engine["32blit Engine<br>Surface drawing, sprites, tilemaps, audio, files"]
     Libs --> Engine
     Engine --> API["blit::api<br>platform function table"]
-    API --> Z["32blit-zephyr<br>Gen 1 handheld"]
+    API --> Z["32blit-zephyr<br>handheld"]
     API --> SDL["32blit-sdl<br>desktop + browser"]
     API --> ST["32blit-stm32 / pico<br>existing upstream ports"]
 ```
@@ -52,7 +52,7 @@ The editor sits beside this stack and talks to it through SDK actions (Section 8
 
 | 32blit needs | Zephyr provides |
 |--------------|-----------------|
-| Screen | Zephyr display driver for the Gen 1 panel |
+| Screen | Zephyr display driver for the panel |
 | Buttons, joystick | Input subsystem (GPIO keys, ADC) |
 | Time | `k_uptime_get()` |
 | Audio | I2S or DAC driver on its own thread |
@@ -300,7 +300,7 @@ The existing `32blit` tools are reused or wrapped rather than replaced.
 
 ## 13. Ease-of-Use Checklist
 
-- [ ] Existing 32blit examples and boilerplate run on Gen 1 unchanged.
+- [ ] Existing 32blit examples and boilerplate run on the handheld unchanged.
 - [ ] A moving sprite is a few lines of 32blit code, or one entity with two components.
 - [ ] Levels are made in Tiled or the editor, not in code.
 - [ ] Every GUI action has an equivalent code call or console command.
@@ -312,7 +312,7 @@ The existing `32blit` tools are reused or wrapped rather than replaced.
 
 ## 14. Open Questions
 
-1. **Gen 1 MCU:** H745 or H7R7? Decided by the Jet benchmark.
+1. **MCU:** H745 or H7R7? Decided by the Jet benchmark.
 2. **Launcher loader:** Zephyr LLEXT or a custom loader for SD games?
 3. **H745 M4 core:** system services only, or exposed to games?
 4. **Jet and 2D:** Does Jet own the whole frame in Stage 4, or run beside 2D drawing?
@@ -323,7 +323,7 @@ The existing `32blit` tools are reused or wrapped rather than replaced.
 
 1. Create `32blit-zephyr` in the SDK fork: display, input, time and a main-loop thread.
 2. Run an unmodified 32blit example on an H745- or H7R7-class dev board.
-3. Set the SDL build to the Gen 1 memory limits.
+3. Set the SDL build to the handheld's memory limits.
 4. Add audio and file access to the port.
 5. Confirm the asset pipeline with one Tiled map and one Aseprite sprite.
 6. Measure frame time and memory against Section 9.
