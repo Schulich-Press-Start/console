@@ -136,7 +136,7 @@ Why this model:
 - **Room to grow:** new features are new components and systems. Nothing existing changes.
 - **Editor support for free:** the editor works with any registered component, including ones a game defines itself.
 
-Games that don't want ECS use plain 32blit and skip this library.
+The ECS is built on 32blit: its systems draw, read input and play audio through the 32blit API. Games can mix ECS with direct 32blit calls, or skip the ECS and use 32blit alone.
 
 ### Component Registry
 
