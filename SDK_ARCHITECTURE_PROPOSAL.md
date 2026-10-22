@@ -259,6 +259,24 @@ The game slot size is part of the game ABI and is fixed once the RAM size is kno
 
 Tooling: Tracy for frame timing on desktop, an on-device FPS and frame-time overlay, a heap view and a draw-call counter.
 
+### Engineering Practices
+
+| Practice | Benefit |
+|----------|---------|
+| Hardware acceleration behind an interface, software path as default | Desktop and browser builds need the software path; toggling acceleration off isolates rendering bugs; a chip change only swaps the backend |
+| Memory layout in board config (devicetree, linker), not engine code | RAM changes become config edits; the SDL build enforces the same limits |
+| Kconfig feature profiles | Games only pay flash and RAM for features they use; smaller test builds |
+| CI builds SDL, `native_sim` and the real board on every PR | Catches platform-specific breakage early; tests run without hardware |
+| Engine code never calls Zephyr or the HAL directly; only the port does (enforced by CMake include paths) | Clean layering; engine code is unit-testable on desktop |
+| Asset formats with fixed-width types, explicit byte order and a version number | PC-built assets load correctly on device; old packs fail clearly |
+| Chip-specific maths (DSP intrinsics, inline asm) behind small functions with a plain C++ fallback | Easier to test and profile; the fallback is the reference result |
+| `float`, not `double`; fixed-point where precision matters | Faster on the M7 and deterministic |
+| Memory pools or an allocator interface; no unbounded `malloc` during play | No fragmentation or out-of-memory surprises mid-game |
+| Timing through the SDK time API, never cycle counts or busy loops | Correct at any clock speed or power mode |
+| Services (audio, loader) behind queues; no assumption about core count | Cleaner threading, easier debugging |
+
+Keeping chip-specific code in these places also leaves an easy route to other Zephyr boards if that is ever wanted.
+
 ---
 
 ## 10. 3D Rendering: Jet
