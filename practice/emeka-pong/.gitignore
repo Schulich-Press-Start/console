@@ -1,0 +1,56 @@
+build/
+build.*/
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+.idea/
+*.iws
+*.iml
+*.ipr
+
+build/
+DerivedData/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 🤖 AI Code Assistants & LLM Frameworks
+
+# Cline config, memory, and MCP files
+.cline/
+cline_docs/
+.clinerules
+
+# Claude Code & Claude Engineer
+# =========================================================================
+# Claude Code Settings & Session Storage (Private to your workflow)
+# =========================================================================
+.claude/settings.local.json
+.claude/sessions/
+.claude/todos/
+.claude/cache/
+.claude/tmp/
+.claude/scheduled_tasks.*
+claude-debug.log
+CLAUDE.local.md
+
+.serena/
+
+
+# General AI configurations & memory banks
+.cursorrules
+.continue/
+.copilot/
+
+# API Keys and Environment Secrets
+.env
+.env.local
+.env.*.local
