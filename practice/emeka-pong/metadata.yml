@@ -1,5 +1,5 @@
 title: pong!!!
-description: classic pong game! two players, one ball, serve after each point.
+description: classic pong against a cpu paddle. first to 5 wins.
 author: emeka
 splash:
   file: assets/no-image.png

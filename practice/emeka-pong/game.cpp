@@ -210,15 +210,19 @@ void render(uint32_t time) {
 
   // Dashed centre line.
   screen.pen = Pen(90, 90, 90);
-  for (int y = 0; y < SCREEN_HEIGHT; y += 8) {
-    screen.rectangle(Rect(SCREEN_WIDTH / 2 - 1, y, 2, 4));
+  if (state != State::GameOver) {
+    for (int y = 0; y < SCREEN_HEIGHT; y += 8) {
+      screen.rectangle(Rect(SCREEN_WIDTH / 2 - 1, y, 2, 4));
+    }
   }
 
   // Paddles and ball.
   screen.pen = Pen(255, 255, 255);
   screen.rectangle(player.rect());
   screen.rectangle(cpu.rect());
-  screen.rectangle(ball.rect());
+  if (state != State::GameOver) {
+    screen.rectangle(ball.rect());
+  }
 
   // Scores.
   screen.text(std::to_string(player_score), minimal_font, Point(SCREEN_WIDTH / 4, 4), true, TextAlign::top_center);
@@ -227,7 +231,7 @@ void render(uint32_t time) {
   // Messages.
   Rect whole_screen(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
   if (state == State::Serving) {
-    screen.text("Up/Down to move, A (Z key) to serve", minimal_font,
+    screen.text("Up/Down: move  A (Z): serve", minimal_font,
                 Point(SCREEN_WIDTH / 2, SCREEN_HEIGHT - 12), true, TextAlign::top_center);
   } else if (state == State::GameOver) {
     screen.text(player_score > cpu_score ? "You win!" : "CPU wins", minimal_font,
