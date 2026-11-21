@@ -30,25 +30,31 @@ So, we need tooling and continuous integration for error checking code before it
 
 - Jenkins
 
-- Buildbot
+- Buildbot (this and jenkins are probably actually a no-go due to requiring server hosting)
 
-- Github Actions (interested in this one)
+- Github Actions (interested in this one, easy and closely integrated with github)
 
-- Azure DevOps
+- Azure DevOps 
 
 ##### Tooling
 
 - Docker
 
+- 
 
 ### Decision
 
-(Decision still pending, would like to make the decision with Johann)
+Right now, the decision is pending because I would like Johanns input.
+
+However, from the information I have gathered, it seems that Github Actions is the right choice here for CI.
+This is because of the fact it is free, its close integration with Github, and being relatively low maintenance.
 
 ### Open questions
 
-- How specifically to setup and customize Github Actions
+- How should the chosen CI workflow be setup?
 
 - What do people on the team specifically want, may have to change design depending on what
+
+- Where should the workflows live?
 
 - 
