@@ -1,0 +1,10 @@
+title: Test pattern
+description: RGB565 test pattern for week 3
+author: Emeka Edeh
+splash:
+  file: assets/no-image.png
+icon:
+  file: assets/no-icon.png
+version: v0.0.1
+category: demo # game, demo, utility, ...
+url: https://github.com/Schulich-Press-Start/console
