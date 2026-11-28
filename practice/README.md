@@ -1,6 +1,6 @@
 # Practice work
 
-Week 1 games and week 2 Zephyr apps go here, one folder each, named after you and the project, like `practice/aly-pong/` or `practice/aly-pipeline/`. CI doesn't build this folder, so practice code can't break `main`. For the full week plans, see the ES onboarding guide pinned in #embedded-software on Discord.
+Week 1 games and week 2 event pipelines go here, one folder each, named after you and the project, like `practice/aly-pong/` or `practice/aly-pipeline/`. CI doesn't build this folder, so practice code can't break `main`. For the full week plans, see the ES onboarding guide pinned in #embedded-software on Discord.
 
 ## Week 1: a game on the 32blit SDK
 
@@ -20,16 +20,17 @@ Make **Pong, Snake, or Brick Breaker**. Game logic goes in `update()`, drawing i
    On Windows, follow the SDK's [Windows guide](https://github.com/32blit/32blit-sdk/blob/master/docs/Windows.md) for the generator to use.
 5. Open a PR. Your pair reviews it first, then Yassin does the final review and merges.
 
-## Week 2: an event pipeline on Zephyr
+## Week 2: an event pipeline in C++, then on Linux
 
-Make it its own Zephyr app. Start from a Zephyr sample, like the shell sample below, and build it from the `console` folder:
+Make it a plain C++ program in its own folder, like `practice/aly-pipeline/`:
 
-```sh
-cp -r ../zephyr/samples/subsys/shell/shell_module practice/aly-pipeline
-west build -p always -b native_sim practice/aly-pipeline
-west build -t run
-```
+1. A thread fakes button presses on a timer.
+2. Events go into a thread-safe queue: a `std::mutex` and `std::condition_variable` around a `std::queue`.
+3. A consumer thread logs `button X pressed at T ms`.
+4. A heartbeat thread logs every 500 ms.
 
-On a Mac, build with `-b qemu_x86` instead (see the ES onboarding guide pinned in #embedded-software on Discord). Open a PR when it works.
+That part runs on Linux, WSL 2, and macOS. Then do the Linux part in your Linux VM or on Linux: read a real keyboard from `/dev/input/eventN`, make a fake gamepad with uinput that presses `BTN_SOUTH` every second, and swap the heartbeat thread for a `timerfd`. Answer the devicetree questions in your PR description.
+
+The full steps are in week 2 of the ES onboarding guide (T113 edition), pinned in #embedded-software on Discord. Open a PR when it works.
 
 Don't commit your `build/` folder. The repo's `.gitignore` already skips it.

@@ -6,10 +6,10 @@
 
 ## How I tested it
 
-<!-- For firmware, name the board target (like nucleo_h755zi_q/stm32h755xx/m7)
+<!-- Name the target you built for (PC simulator, 32blit-linux in a VM, or the dev board)
      and paste the logs. For anything on a screen, add a photo or screenshot. -->
 
-- Board target(s):
+- Target(s):
 - Logs, photo, or screenshot:
 
 ## Checklist
