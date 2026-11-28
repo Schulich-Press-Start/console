@@ -7,8 +7,6 @@ So, we need tooling and continuous integration for error checking code before it
 
 ### Constraints
 
-- Unsure of platform
-
 - Needed to be used by Embedded Software and potentially Game Design
 
 - Must be automatic 
