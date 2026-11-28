@@ -3,6 +3,7 @@
 ### Problem
 
 Without proper CI integration, a broken PR could reach the review phase instead of being caught early, and without proper build tools, the Game design team has no easily accessible way to get a simulator build.
+
 So, we need tooling and continuous integration for error checking code before it is sent to final review. This needs to be automatic and constant. We need automatic builds to enable this.
 
 **What we already have right now:**
@@ -11,7 +12,7 @@ So, we need tooling and continuous integration for error checking code before it
 
 **Whats missing:**
 - No workflow currently builds or tests 32blit-linux yet, using four check template in onboarding guide (sync with aly so we dont end up with two)
-- Nothing currently builds the buildroot image from external tree in console and publishes the cross-compiler sdk (currently, it likely runs on main/nightly instead of on every PR)
+- Nothing currently builds the buildroot image from external tree in console and publishes the cross-compiler sdk 
 
 ### Constraints
 
@@ -35,7 +36,7 @@ So, we need tooling and continuous integration for error checking code before it
 
 - Buildbot (this and jenkins are probably actually a no-go due to requiring server hosting)
 
-- **Github Actions** (interested in this one, easy and closely integrated with github)
+- **Github Actions** (chosen, due to being free, needing no server, and already being used by sps repos)
 
 - Azure DevOps (may not be able to integrate it into github that easily)
 
@@ -69,7 +70,7 @@ Game Design can use existing WIN64 and MacOS builds published in releases, with 
 
 Workflows live in each repo's `.github/workflows` next to what they build.
 
-However, I am still waiting on Johann's input on the build of the buildroot image
+However, I am still waiting on Johann's input on the build of the buildroot image. A first build takes 20-60 minutes, so we are considering running it on main/nightly with caching, instead of on every PR
 
 ### Open questions
 
@@ -79,4 +80,6 @@ However, I am still waiting on Johann's input on the build of the buildroot imag
 
 - How often does the buildroot image currently (main or nightly?), and how do we cache it?
 
-- Who fixes browser build's deploy step, and who owns the four-check workflow (Aly?)
+- Who fixes browser build's deploy step?
+
+- Who owns the four-check workflow (Aly?)
