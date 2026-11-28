@@ -33,4 +33,4 @@ Your game shows up in the list next to the examples. It's rebuilt every time the
 
 - You need Docker Desktop, OrbStack, or any Docker with Compose v2.
 - Apple Silicon Macs run it through Rosetta, because Emscripten 2.0.18, the version 32blit's own CI uses, only ships for x86. Builds are slower there, but it works.
-- This builds for the browser, not for our console's hardware. Firmware work still needs the Zephyr setup in the main [README](../../README.md).
+- This builds for the browser, not for the handheld. Gen 1 runs on the T113-S3 with our own Linux now, so hardware work goes through [32blit-linux](https://github.com/Schulich-Press-Start/32blit-sdk/tree/master/32blit-linux), our Linux port in the SDK fork: run games on it in a Linux VM, or build them for the board with its `t113.toolchain`. You don't need the Zephyr setup. The ES onboarding guide (T113 edition), pinned in #embedded-software on Discord, has the steps.
