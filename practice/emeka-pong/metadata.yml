@@ -1,0 +1,10 @@
+title: pong!!!
+description: classic pong against a cpu paddle. first to 5 wins.
+author: emeka
+splash:
+  file: assets/no-image.png
+icon:
+  file: assets/no-icon.png
+version: v0.0.1
+category: game # game, demo, utility, ...
+url: https://github.com/Schulich-Press-Start/console
