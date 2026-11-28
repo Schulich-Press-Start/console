@@ -2,43 +2,38 @@
 
 using namespace blit;
 
-///////////////////////////////////////////////////////////////////////////
-//
-// init()
-//
-// setup your game here
-//
 void init() {
-    set_screen_mode(ScreenMode::hires);
+  set_screen_mode(ScreenMode::hires);
 }
 
-///////////////////////////////////////////////////////////////////////////
-//
-// render(time)
-//
-// This function is called to perform rendering of the game. time is the 
-// amount if milliseconds elapsed since the start of your game
-//
-void render(uint32_t time) {
-
-    // clear the screen -- screen is a reference to the frame buffer and can be used to draw all things with the 32blit
-    screen.clear();
-
-    // draw some text at the top of the screen
-    screen.alpha = 255;
-    screen.mask = nullptr;
-    screen.pen = Pen(255, 255, 255);
-    screen.rectangle(Rect(0, 0, 320, 14));
-    screen.pen = Pen(0, 0, 0);
-    screen.text("Hello 32blit!", minimal_font, Point(5, 4));
-}
-
-///////////////////////////////////////////////////////////////////////////
-//
-// update(time)
-//
-// This is called to update your game state. time is the 
-// amount if milliseconds elapsed since the start of your game
-//
 void update(uint32_t time) {
+}
+
+void render(uint32_t time) {
+  screen.pen = Pen(0, 0, 0);
+  screen.clear();
+
+  int w = screen.bounds.w;
+  int h = screen.bounds.h;
+  int half_w = w / 2;
+  int half_h = h / 2;
+
+  // top left: red
+  screen.pen = Pen(255, 0, 0);
+  screen.rectangle(Rect(0, 0, half_w, half_h));
+
+  // top right: green
+  screen.pen = Pen(0, 255, 0);
+  screen.rectangle(Rect(half_w, 0, w - half_w, half_h));
+
+  // bottom right: blue
+  screen.pen = Pen(0, 0, 255);
+  screen.rectangle(Rect(half_w, half_h, w - half_w, h - half_h));
+
+  // bottom-left: grey fade, one 1-pixel-wide column per x
+  for (int x = 0; x < half_w; x++) {
+    uint8_t v = x * 255 / (half_w - 1);
+    screen.pen = Pen(v, v, v);
+    screen.rectangle(Rect(x, half_h, 1, h - half_h));
+  }
 }
