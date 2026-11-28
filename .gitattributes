@@ -1,0 +1,2 @@
+# these run inside the linux container, so they need lf endings even on a windows checkout
+*.sh text eol=lf
